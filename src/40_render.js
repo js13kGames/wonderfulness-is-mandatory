@@ -234,7 +234,7 @@ function tiles(g) {
       g.fillStyle = 'rgba(30,14,48,.75)';                 // jamb, always visible
       g.fillRect(x + .5, y, 2, TS); g.fillRect(x + 13.5, y, 2, TS);
       if (op) {
-        g.globalAlpha = .22; g.fillStyle = COL[p];
+        g.globalAlpha = .09; g.fillStyle = COL[p];
         g.fillRect(x + 2.5, y, 11, TS); g.globalAlpha = 1;
         g.fillStyle = COL[p];
         if (mid) g.fillRect(x + 2.5, y, 11, 1.8);

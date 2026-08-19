@@ -5,7 +5,7 @@ var total = 0, best = [], maxL = 0, sel = 0, endT = 0, zoom = 1;
 var spare = 13, SPMAX = 13, refund = 0, denied = 0;
 function GC(i) { return 'hsl(' + ((i * 67 + 24) % 360) + ',92%,66%)' }
 var POST = ("THE END OF THE RAINBOW IS THIS WAY!|SHE WILL WAIT HERE. SHE DOESN'T MIND.|" +
-  "EVERY RAINBOW HAS AN END. THIS IS FINE.|YOU ARE MAKING EXCELLENT PROGRESS.|" +
+  "YOU ARE MAKING EXCELLENT PROGRESS.|" +
   "SHE STOOD THERE UNTIL YOU WERE ACROSS.|ONE OF YOU IS ENOUGH, IF SHE HURRIES.|" +
   "THE LIGHT DOES NOT MIND BEING BLOCKED.|PLEASE DO NOT LOOK BACK AT THE MEADOW.|" +
   "TWO COLOURS. ONE OF YOU. AS DESIGNED.|THE STAR WAS NEVER YOURS TO CARRY.|" +
@@ -41,7 +41,7 @@ function startCurtain() {
   spare -= max(0, u - allow());
   refund = 0;
   if (u <= LEV[li].p && spare < SPMAX) { spare++; refund = 1; sfx(3) }
-  total += u; if (best[li] == null || u < best[li]) best[li] = u;
+  total += u + 1; if (best[li] == null || u + 1 < best[li]) best[li] = u + 1;
   if (li + 1 > maxL) maxL = li + 1;
   save();
   resetWorld(); pl.dead = 1;
@@ -184,7 +184,7 @@ function hud() {
   g.fillRect(bx + bw * (1 - pr) - .5, 5, 1, 7.5 + ghosts.length * 1.9);
   var hy = 21 + ghosts.length * 1.9, i2, sl = spareLeft();
   g.font = FT(7, 1);
-  lab(g, 'HERD ' + (ghosts.length - (st == 2 ? 1 : 0)) + '/' + allow() + (best[li] ? '   BEST ' + best[li] : '   PAR ' + L.p), bx, hy, 0,
+  lab(g, 'HERD ' + (ghosts.length + (st == 2 ? 0 : 1)) + '/' + (allow() + 1) + (best[li] ? '   BEST ' + best[li] : '   PAR ' + (L.p + 1)), bx, hy, 0,
       ghosts.length - (st == 2 ? 1 : 0) > allow() ? '#ff9ec4' : '#fff');
   g.font = FT(7, 1); lab(g, L.n, W / 2, 22, 1, '#fff');
   g.font = FT(6.5); lab(g, 'WONDERFULNESS: ' + max(1, M.round((1 - cr) * 100)) + '%', W - 8, 22, 2, cr > .5 ? '#ff9ec4' : 'rgba(255,255,255,.85)');
@@ -232,7 +232,7 @@ function hud() {
     g.textAlign = 'center';
     g.globalAlpha = min(1, ccT * 2);
     bigText(['WONDERFUL!', 'STILL WONDERFUL!', 'WONDERFUL.', 'W O N D E R F U L'][min(3, li >> 2)], W / 2, 52, 21);
-    var nu = ghosts.length - 1;
+    var nu = ghosts.length;
     g.font = FT(8, 1);
     outline(g, nu + (nu == 1 ? ' UNICORN WAS REQUIRED' : ' UNICORNS WERE REQUIRED'), W / 2, H - 10, '#fff');
     if (refund) { g.font = FT(9, 1); g.fillStyle = '#9f9'; g.fillText('PAR MET \u2014 ONE UNICORN RETURNED TO THE RESERVE', W / 2, 72) }
