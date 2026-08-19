@@ -4,6 +4,13 @@ var st = 0, li = 0, acc = 0, last = 0, intro = 0, cc = 0, ccEnd = 0, ccT = 0;
 var total = 0, best = [], maxL = 0, sel = 0, endT = 0, zoom = 1;
 var spare = 13, SPMAX = 13, refund = 0, denied = 0;
 function GC(i) { return 'hsl(' + ((i * 67 + 24) % 360) + ',92%,66%)' }
+var POST = ("THE END OF THE RAINBOW IS THIS WAY!|SHE WILL WAIT HERE. SHE DOESN'T MIND.|" +
+  "EVERY RAINBOW HAS AN END. THIS IS FINE.|YOU ARE MAKING EXCELLENT PROGRESS.|" +
+  "SHE STOOD THERE UNTIL YOU WERE ACROSS.|ONE OF YOU IS ENOUGH, IF SHE HURRIES.|" +
+  "THE LIGHT DOES NOT MIND BEING BLOCKED.|PLEASE DO NOT LOOK BACK AT THE MEADOW.|" +
+  "TWO COLOURS. ONE OF YOU. AS DESIGNED.|THE STAR WAS NEVER YOURS TO CARRY.|" +
+  "THEY ARE STILL STANDING. ALL OF THEM.|A BODY IS A COMPONENT. YOU KNEW THAT.|" +
+  "THE HERD IS A NUMBER. THE NUMBER IS YOU.|THERE IS NO OTHER SIDE.").split('|');
 
 function load() {
   try {
@@ -79,7 +86,7 @@ function loop(now) {
     if (KP & 2) sel = min(min(maxL, LEV.length - 1), sel + 1);
   } else if (st == 3) {
     endT += dt;
-    if (endT > 3 && MP & 16) { st = 0; sel = 0 }
+    if (endT > 6.4 && MP & 16) { st = 0; sel = 0 }
   }
   stepP(); shake *= .86;
   render(dt);
@@ -177,8 +184,8 @@ function hud() {
   g.fillRect(bx + bw * (1 - pr) - .5, 5, 1, 7.5 + ghosts.length * 1.9);
   var hy = 21 + ghosts.length * 1.9, i2, sl = spareLeft();
   g.font = FT(7, 1);
-  lab(g, 'HERD ' + ghosts.length + '/' + allow() + (best[li] ? '   BEST ' + best[li] : '   PAR ' + L.p), bx, hy, 0,
-      ghosts.length > allow() ? '#ff9ec4' : '#fff');
+  lab(g, 'HERD ' + (ghosts.length - (st == 2 ? 1 : 0)) + '/' + allow() + (best[li] ? '   BEST ' + best[li] : '   PAR ' + L.p), bx, hy, 0,
+      ghosts.length - (st == 2 ? 1 : 0) > allow() ? '#ff9ec4' : '#fff');
   g.font = FT(7, 1); lab(g, L.n, W / 2, 22, 1, '#fff');
   g.font = FT(6.5); lab(g, 'WONDERFULNESS: ' + max(1, M.round((1 - cr) * 100)) + '%', W - 8, 22, 2, cr > .5 ? '#ff9ec4' : 'rgba(255,255,255,.85)');
   // the reserve: 13 spare unicorns for the whole game
@@ -225,15 +232,22 @@ function hud() {
     g.textAlign = 'center';
     g.globalAlpha = min(1, ccT * 2);
     bigText(['WONDERFUL!', 'STILL WONDERFUL!', 'WONDERFUL.', 'W O N D E R F U L'][min(3, li >> 2)], W / 2, 52, 21);
-    g.font = FT(8, 1); g.fillStyle = '#fff';
-    g.fillText((ghosts.length - 1) + ((ghosts.length - 1) == 1 ? ' UNICORN' : ' UNICORNS') + ' WERE REQUIRED', W / 2, H - 10);
+    var nu = ghosts.length - 1;
+    g.font = FT(8, 1);
+    outline(g, nu + (nu == 1 ? ' UNICORN WAS REQUIRED' : ' UNICORNS WERE REQUIRED'), W / 2, H - 10, '#fff');
     if (refund) { g.font = FT(9, 1); g.fillStyle = '#9f9'; g.fillText('PAR MET \u2014 ONE UNICORN RETURNED TO THE RESERVE', W / 2, 72) }
+    g.font = FT(7);
+    outline(g, POST[li] || '', W / 2, H - 24, cr > .5 ? '#ffc6dd' : '#fff');
     g.globalAlpha = 1; g.textAlign = 'left';
   }
 }
 function lab(g, s, x, y, al, col) {         // text stays legible on any sky
   g.textAlign = ['left', 'center', 'right'][al];
   g.strokeStyle = 'rgba(18,6,32,.62)'; g.lineWidth = 2.6; g.lineJoin = 'round';
+  g.strokeText(s, x, y); g.fillStyle = col; g.fillText(s, x, y);
+}
+function outline(g, s, x, y, col) {
+  g.strokeStyle = 'rgba(16,6,30,.92)'; g.lineWidth = 3; g.lineJoin = 'round';
   g.strokeText(s, x, y); g.fillStyle = col; g.fillText(s, x, y);
 }
 function bigText(s, x, y, sz) {
@@ -284,11 +298,12 @@ function ending() {
     g.restore();
   }
   g.globalAlpha = 1;
-  if (t > .6) bigText('THANK YOU FOR YOUR PARTICIPATION.', W / 2, H * .34, 14);
-  if (t > 1.6) { g.font = FT(10, 1); g.fillStyle = '#fff'; g.fillText('UNICORNS SPENT: ' + total, W / 2, H * .48);
-    g.fillStyle = spare > 6 ? '#9f9' : '#ffd0e4'; g.fillText('RESERVE INTACT: ' + spare + ' / ' + SPMAX, W / 2, H * .56) }
-  if (t > 2.6) { g.font = FT(9); g.fillStyle = '#f9b'; g.fillText('WONDERFULNESS: 0%', W / 2, H * .64) }
-  if (t > 3.6) { g.font = FT(9, 1); g.fillStyle = '#fff'; g.globalAlpha = .6 + sin(T * 4) * .35; g.fillText('A NEW UNICORN HAS BEEN ISSUED.', W / 2, H * .72); g.globalAlpha = 1 }
+  if (t > .6) bigText('YOU HAVE REACHED THE END OF THE RAINBOW.', W / 2, H * .26, 13);
+  if (t > 1.8) { g.font = FT(9); g.fillStyle = '#ffc6dd'; g.fillText('IT IS A DOOR. IT ISSUES A NEW MEADOW.', W / 2, H * .38) }
+  if (t > 3.2) { g.font = FT(10, 1); g.fillStyle = '#fff'; g.fillText('UNICORNS SPENT: ' + total, W / 2, H * .5);
+    g.fillStyle = spare > 6 ? '#9f9' : '#ffd0e4'; g.fillText('RESERVE INTACT: ' + spare + ' / ' + SPMAX, W / 2, H * .58) }
+  if (t > 4.6) { g.font = FT(9); g.fillStyle = '#f9b'; g.fillText('THEY ARE ALL STILL STANDING WHERE YOU LEFT THEM.', W / 2, H * .66) }
+  if (t > 5.8) { g.font = FT(9, 1); g.fillStyle = '#fff'; g.globalAlpha = .6 + sin(T * 4) * .35; g.fillText('A NEW UNICORN HAS BEEN ISSUED.', W / 2, H * .78); g.globalAlpha = 1 }
   g.textAlign = 'left';
 }
 

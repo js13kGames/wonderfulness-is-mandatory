@@ -98,10 +98,26 @@ need three unicorns holding three plates; one unicorn can hold `$` and then walk
 but its window is 0.67s, so par is deliberately left at 3 — anyone who finds the tight
 line gets the bonus, and nobody is *required* to be frame-perfect on the closing level.
 
-L05 ("YOUR BRIDGE IS ON LOAN") is the level that teaches this: the mirror that makes
-your bridge is the same mirror that, when released, points the beam at the receiver
-that opens the gate. A ghost that stands on the plate forever **cannot** solve it. It
-has to hold, let you across, and then step off.
+Two levels teach this outright.
+
+**L05, "YOUR BRIDGE IS ON LOAN"** - the mirror that makes your bridge is the same
+mirror that, when released, points the beam at the receiver that opens the gate. A
+ghost that stands on the plate forever **cannot** solve it. It has to hold, let you
+across, then step off.
+
+**L06, "TWO PLACES AT ONCE"** - two toggle mirrors sit back to back. Plate `!` swings
+the beam right into a bridge; plate `@` swings the *other* mirror up into the receiver
+that opens the gate. But `!` wins the junction, so holding both at once is the same as
+holding neither. Verified:
+
+```
+SOLVES  ONE ghost tours: hold ! then walk to @
+fails   TWO ghosts standing still, one per plate
+fails   THREE ghosts standing still
+```
+
+You cannot brute-force it with more unicorns. One has to walk. That is the method the
+par-2 levels quietly depend on, so the game states it plainly before it asks for it.
 
 ## Design notes
 

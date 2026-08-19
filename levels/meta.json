@@ -20,6 +20,10 @@
   "t": "PLEASE REMAIN WONDERFUL."
  },
  {
+  "n": "TWO PLACES AT ONCE",
+  "t": ""
+ },
+ {
   "n": "STAND IN THE LIGHT",
   "t": ""
  },
@@ -32,23 +36,23 @@
   "t": ""
  },
  {
-  "n": "THE THREE STATUES",
-  "t": "YOU HAVE ALWAYS BEEN THIS MANY."
- },
- {
   "n": "A STAR FOR THE COLLECTION",
   "t": ""
  },
  {
-  "n": "A BODY IS A COMPONENT",
-  "t": "DO NOT COUNT THE UNICORNS."
+  "n": "THE THREE STATUES",
+  "t": "YOU HAVE ALWAYS BEEN THIS MANY."
  },
  {
-  "n": "THE HERD IS A NUMBER",
+  "n": "A BODY IS A COMPONENT",
   "t": ""
  },
  {
+  "n": "THE HERD IS A NUMBER",
+  "t": "DO NOT COUNT THE UNICORNS."
+ },
+ {
   "n": "WALK INTO THE LIGHT",
-  "t": "THERE WAS ONLY EVER ONE OF YOU."
+  "t": "THERE WAS ONLY EVER ONE."
  }
 ]
