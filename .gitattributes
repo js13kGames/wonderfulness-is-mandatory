@@ -1,0 +1,5 @@
+# The packed build contains raw control bytes (0x19, 0x1c) from Roadroller.
+# Any line-ending translation destroys it, so never treat it as text.
+dist/index.html  -text -diff
+docs/index.html  -text -diff
+*.zip            binary

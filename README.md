@@ -60,7 +60,7 @@ src/50_game.js     game states, curtain call, HUD, title, ending
 levels/LNN.txt          17x30 ASCII maps          (see levels/README.md)
 levels/LNN.plan.json    a proof that the level is solvable
 levels/meta.json        level names and intertitles
-build.js                the whole build
+build.mjs                the whole build
 ```
 
 ## Tests
@@ -82,6 +82,16 @@ bundle runs clean the packed `index.html` does too. It is the guard against
 `unsafe` compression and top-level mangling quietly breaking the game.
 
 ---
+
+## Playing it
+
+The built game is one self-contained `index.html`. `docs/index.html` is the same file,
+byte for byte, and is what GitHub Pages serves.
+
+`.gitattributes` marks both as binary. This matters: Roadroller's output contains raw
+`0x19` and `0x1c` bytes, and any line-ending translation (a Windows clone with
+`core.autocrlf=true`, an editor that "cleans" the file on save) silently corrupts the
+decoder and the page renders nothing.
 
 ## The herd economy
 

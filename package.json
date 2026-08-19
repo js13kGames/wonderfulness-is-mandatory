@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "node build.js",
-    "dev": "node build.js --dev",
+    "build": "node build.mjs",
+    "dev": "node build.mjs --dev",
     "gen": "node test/gen.js",
-    "test": "node test/gen.js && node test/lint.js && node test/devices.js && node test/batch.js && node test/playthrough.js && node build.js && node test/prod.js",
+    "test": "node test/gen.js && node test/lint.js && node test/devices.js && node test/batch.js && node test/playthrough.js && node build.mjs && node test/prod.js",
     "serve": "node serve.js",
     "slack": "node -e \"const fs=require('fs');const{check}=require('./test/check');for(let n=1;n<=13;n++){const id='L'+String(n).padStart(2,'0');const m=fs.readFileSync('levels/'+id+'.txt','utf8').replace(/\\n+$/,'');const r=check(m,JSON.parse(fs.readFileSync('levels/'+id+'.plan.json','utf8')));console.log(id,r.ok?'win f'+r.f+' slack '+(780-r.f)+'f':'FAIL')}\""
   },
