@@ -1,0 +1,6 @@
+node_modules/
+shots/
+dist/min.js
+dist/screenshot-*.png
+
+.claude/

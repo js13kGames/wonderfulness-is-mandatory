@@ -1,0 +1,19 @@
+{
+  "ecma": 2020,
+  "toplevel": true,
+  "compress": {
+    "passes": 5, "unsafe": true, "unsafe_arrows": true, "unsafe_comps": true,
+    "unsafe_math": true, "unsafe_methods": true, "unsafe_proto": true,
+    "unsafe_regexp": true, "unsafe_undefined": true, "booleans_as_integers": true,
+    "drop_console": true, "pure_getters": true, "hoist_funs": true,
+    "toplevel": true, "arguments": true, "keep_fargs": false
+  },
+  "mangle": {
+    "toplevel": true,
+    "properties": {
+      "builtins": true,
+      "reserved": ["width","height","getContext","fillStyle","strokeStyle","fillRect","fillText","font","globalAlpha","globalCompositeOperation","beginPath","moveTo","lineTo","closePath","fill","stroke","ellipse","arc","save","restore","translate","scale","setTransform","createLinearGradient","addColorStop","lineWidth","getElementById","innerWidth","innerHeight","addEventListener","requestAnimationFrame","code","preventDefault","createOscillator","createGain","gain","frequency","value","type","setValueAtTime","exponentialRampToValueAtTime","currentTime","connect","destination","start","stop","length","push","pop","splice","slice","concat","fill","floor","ceil","min","max","abs","random","sin","cos","pow","sqrt","PI","toFixed","includes","ArrowLeft","ArrowRight","ArrowUp","KeyA","KeyD","KeyW","KeyE","KeyR","Space"]
+    }
+  },
+  "format": { "quote_style": 1 }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "wonderfulness-is-mandatory",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js --dev",
+    "gen": "node test/gen.js",
+    "test": "node test/gen.js && node test/lint.js && node test/devices.js && node test/batch.js && node test/playthrough.js && node build.js && node test/prod.js",
+    "serve": "node serve.js",
+    "slack": "node -e \"const fs=require('fs');const{check}=require('./test/check');for(let n=1;n<=13;n++){const id='L'+String(n).padStart(2,'0');const m=fs.readFileSync('levels/'+id+'.txt','utf8').replace(/\\n+$/,'');const r=check(m,JSON.parse(fs.readFileSync('levels/'+id+'.plan.json','utf8')));console.log(id,r.ok?'win f'+r.f+' slack '+(780-r.f)+'f':'FAIL')}\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "description": "js13kGames 2026 entry - a 13-second time-loop puzzle platformer where rainbows are the circuitry and the floor",
+  "devDependencies": {
+    "roadroller": "^2.1.0",
+    "terser": "^5.50.0"
+  }
+}
