@@ -72,6 +72,9 @@ build.js                the whole build
 | `node test/batch.js` | every level is solvable, with the ghost count its plan claims |
 | `node test/playthrough.js` | the whole game runs start → ending |
 | `node test/prod.js` | the **terser-minified** bundle survives ~1500 real frames |
+| `node test/reach.js` | the castle is NOT reachable by geometry alone - no level can be walked through |
+| `node test/cheese.js` | an adversarial bot (48 policies + seeded random search) cannot beat any level below par |
+| `node test/parcheck.js` | par really is the minimum: no one-ghost-two-plates shortcut is missed |
 | `node test/try.js levels/L07.txt --plan` | lint + ASCII beam preview + solvability for one level |
 
 `test/prod.js` is the important one: Roadroller is lossless, so if the minified
@@ -79,6 +82,26 @@ bundle runs clean the packed `index.html` does too. It is the guard against
 `unsafe` compression and top-level mangling quietly breaking the game.
 
 ---
+
+## The herd economy
+
+Every level issues you **par + 1** unicorns. `par` is the machine-verified *minimum*,
+found by `test/parcheck.js`, which searches for routes where one ghost serves two
+plates at different times instead of two ghosts standing still. Going over the
+allowance draws on a reserve of **13 spare unicorns for the whole game**; finishing at
+par or better returns one to the reserve. Run dry and you cannot commit another loop —
+you have to undo one instead. It is pressure, never a dead end.
+
+Three levels are secretly timing puzzles because of this. L07 and L08 look like they
+need three unicorns holding three plates; one unicorn can hold `$` and then walk to
+`@`, and the window is nine seconds wide, so par is 2. L13 has a two-unicorn route too,
+but its window is 0.67s, so par is deliberately left at 3 — anyone who finds the tight
+line gets the bonus, and nobody is *required* to be frame-perfect on the closing level.
+
+L05 ("YOUR BRIDGE IS ON LOAN") is the level that teaches this: the mirror that makes
+your bridge is the same mirror that, when released, points the beam at the receiver
+that opens the gate. A ghost that stands on the plate forever **cannot** solve it. It
+has to hold, let you across, and then step off.
 
 ## Design notes
 
