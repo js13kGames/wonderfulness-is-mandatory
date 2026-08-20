@@ -74,6 +74,7 @@ build.mjs                the whole build
 | `node test/batch.js` | every level is solvable, with the ghost count its plan claims |
 | `node test/playthrough.js` | the whole game runs start → ending |
 | `node test/prod.js` | the **terser-minified** bundle survives ~1500 real frames |
+| `node test/zip.js` | the submission zip has `index.html` in the **top directory**, is under 13,312 bytes, has no OS junk, no external URLs, and extracts byte-identical |
 | `node test/reach.js` | the castle is NOT reachable by geometry alone - no level can be walked through |
 | `node test/cheese.js` | an adversarial bot (48 policies + seeded random search) cannot beat any level below par |
 | `node test/parcheck.js` | par really is the minimum: no one-ghost-two-plates shortcut is missed |
