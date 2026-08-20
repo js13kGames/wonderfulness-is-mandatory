@@ -40,10 +40,24 @@ if (min.error) throw min.error;
 const js = min.code;
 fs.writeFileSync('dist/min.js', js);
 
+// Roadroller's optimiser calls Math.random, so two builds of identical source
+// produce different bytes and the committed zip drifts from a rebuild. Seed it so
+// the artifact is reproducible: same source in, same zip out.
+const realRandom = Math.random;
+let seed = 0x13c0ffee >>> 0;   // any fixed value; this one just says 13
+Math.random = () => {
+  seed = (seed + 0x6d2b79f5) >>> 0;
+  let t = seed;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
 const packer = new Packer([{ data: js, type: 'js', action: 'eval' }], {
   maxMemoryMB: 512,
 });
 await packer.optimize(2);
+Math.random = realRandom;
 const { firstLine, secondLine } = packer.makeDecoder();
 const packed = firstLine + secondLine;
 
@@ -55,6 +69,9 @@ fs.mkdirSync('docs', { recursive: true });
 fs.writeFileSync('docs/index.html', html);
 fs.writeFileSync('docs/.nojekyll', '');
 
+// Pin the stored mtime too, or two builds differ by the 2 timestamp bytes in the
+// local header and the central directory. 13 Aug 2026 is the day the compo opened.
+cp.execSync('touch -t 202608131300 dist/index.html');
 cp.execSync('cd dist && rm -f game.zip && zip -9 -X -q game.zip index.html');
 // try advzip/ect if present
 try { cp.execSync('cd dist && advzip -z -4 -q game.zip', { stdio: 'ignore' }); } catch (e) {}
