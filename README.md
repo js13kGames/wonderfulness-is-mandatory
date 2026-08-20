@@ -1,5 +1,7 @@
 # WONDERFULNESS IS MANDATORY
 
+**[Play it in your browser](https://mvnshi.github.io/js13k-2026/)** — 13KB, no install, works offline once loaded.
+
 A js13kGames 2026 entry. Theme: **Unicorns and Rainbows**.
 
 You are a tiny unicorn with thirteen seconds. When the loop ends, a ghost is left
@@ -84,6 +86,8 @@ bundle runs clean the packed `index.html` does too. It is the guard against
 ---
 
 ## Playing it
+
+Live at **https://mvnshi.github.io/js13k-2026/** (GitHub Pages, served from `main` `/docs`).
 
 The built game is one self-contained `index.html`. `docs/index.html` is the same file,
 byte for byte, and is what GitHub Pages serves.
