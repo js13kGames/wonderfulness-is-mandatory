@@ -3,6 +3,7 @@
 var st = 0, li = 0, acc = 0, last = 0, intro = 0, cc = 0, ccEnd = 0, ccT = 0;
 var total = 0, best = [], maxL = 0, sel = 0, endT = 0, zoom = 1;
 var spare = 13, SPMAX = 13, refund = 0, denied = 0;
+var bt = 0, pz = 0, msel = 0;
 function GC(i) { return 'hsl(' + ((i * 67 + 24) % 360) + ',92%,66%)' }
 var POST = ("THE END OF THE RAINBOW IS THIS WAY!|SHE WILL WAIT HERE. SHE DOESN'T MIND.|" +
   "YOU ARE MAKING EXCELLENT PROGRESS.|" +
@@ -30,12 +31,12 @@ function spareLeft() { return spare - over() }
 function startLevel(n) {
   li = n; sel = n; ghosts = []; parseLevel(LEV[n].m);
   cr = LEV.length > 1 ? M.pow(n / (LEV.length - 1), 1.85) : 0;   // stay cheerful, then collapse
-  refund = 0; denied = 0;
+  refund = 0; denied = 0; pz = 0;
   skyC = -1; cc = 0; intro = 2.4; st = 1; P.length = 0;
   resetWorld();
 }
 function startCurtain() {
-  ghosts.push({ i: rec.slice(0, frame + 1), n: frame + 1 });
+  ghosts.push({ i: rec.slice(0, frame + 1), n: frame + 1, pt: pl.pt });
   ccEnd = frame + 40; ccT = 0; cc = 1; st = 2; zoom = 1;
   var u = ghosts.length - 1;                       // the winning run is not a ghost you spent
   spare -= max(0, u - allow());
@@ -53,10 +54,9 @@ function tick() {
     if (frame >= ccEnd) return;
     K = 0; step(); won = 0; return;
   }
-  if (won) { sfx(7); shake = 7; burst(pl.x, pl.y - 8, 7, 46); startCurtain(); return }
+  if (won) { sfx(7); shake = 7; buzz(240, 1); burst(pl.x, pl.y - 8, 7, 46); startCurtain(); return }
   if (frame >= LOOPF) { commitLoop(); return }
-  if (pl.dead) { resetWorld(); sfx(6); return }
-  step();
+  if (pl.dead) { shake = 6; loopFlash = .55; buzz(160, .9); resetWorld(); sfx(6); return }  step();
   if (frame > LOOPF - 180 && !(frame % 20)) sfx(9);
 }
 
@@ -64,10 +64,21 @@ function loop(now) {
   requestAnimationFrame(loop);
   var dt = min(.05, (now - last) / 1000); last = now; T += dt;
   inputPoll();
-  if (st == 1) {
+  bt = st && st < 3 ? max(0, 1 - frame % 60 / 14) : max(0, 1 - T % 1 * 4);   // the clock, made visible
+  if (st == 1 && MP & 128) { pz ^= 1; if (A) pz ? A.suspend() : A.resume() }   // freeze the song WITH the sim
+  if (pz) {
+    if (KP & 1) { msel += 2; msel %= 3 }
+    if (KP & 2) msel = (msel + 1) % 3;
+    if (MP & 1 || KP & 4) {
+      if (msel == 1) { pz = 0; ghosts = []; resetWorld(); if (A) A.resume() }
+      else if (msel == 2) { pz = 0; st = 0; sel = li; if (A) A.resume() }
+      else { pz = 0; if (A) A.resume() }
+    }
+  } else if (st == 1) {
     if (MP & 1) commitLoop();
     if (MP & 2) undoLoop();
     if (MP & 8) { ghosts = []; resetWorld() }
+    if (MP & 64) { resetWorld(); sfx(6) }        // retry this loop, keep the herd
     acc += dt;
     var n = 0, mx = meta & 4 ? 5 : 1;
     while (acc > 1 / 60 && n < 8) { acc -= 1 / 60; for (var q = 0; q < mx && st == 1; q++) tick(); n++ }
@@ -93,7 +104,7 @@ function loop(now) {
 }
 
 function render() {
-  var sh = shake * (rnd(T * 313) - .5) * 2, sv = shake * (rnd(T * 71 + 5) - .5) * 2, z = st == 2 ? zoom : 1;
+  var sk = RM ? 0 : shake, sh = sk * (rnd(T * 313) - .5) * 2, sv = sk * (rnd(T * 71 + 5) - .5) * 2, z = st == 2 ? zoom : 1;
   X.setTransform(1, 0, 0, 1, 0, 0);
   X.fillStyle = '#0d0a18'; X.fillRect(0, 0, c.width, c.height);
   var s2 = SC * DPR * z;
@@ -121,17 +132,28 @@ function render() {
   for (i = 0; i < actors.length; i++) {
     a = actors[i]; if (a.dead) continue;
     if (i < ghosts.length) {
-      X.globalAlpha = .45; X.fillStyle = GC(i);
+      var pq = ghosts[i].pt;                       // where this ghost walks: dotted route
+      X.globalAlpha = .24; X.fillStyle = GC(i);
+      for (var j2 = 0; j2 < pq.length; j2 += 2) X.fillRect(pq[j2] - 1, pq[j2 + 1] - 1, 2, 2);
+      X.globalAlpha = .45;
+      X.fillStyle = GC(i);
       X.beginPath(); X.ellipse(a.x, a.y - 1, 9, 2.6, 0, 0, TAU); X.fill();
       X.globalAlpha = 1;
       uni(X, a, .38 + .2 * M.pow(.94, ghosts.length - i), 0, i + 1, GC(i));
     }
   }
-  if (!pl.dead) { rim(X, pl); uni(X, pl, 1, 0, 0, 0) }
+  if (!pl.dead) {
+    rim(X, pl); uni(X, pl, 1, 0, 0, 0);
+    if (st == 1 && frame > LOOPF - 181) {          // last-3s ring, around you not in the HUD
+      X.strokeStyle = '#fff'; X.globalAlpha = .6; X.lineWidth = 1.7;
+      X.beginPath(); X.arc(pl.x, pl.y - 13, 13.5, -PI / 2, -PI / 2 + (LOOPF - frame) / 60 % 1 * TAU); X.stroke();
+      X.globalAlpha = 1;
+    }
+  }
   drawP(X);
   X.globalCompositeOperation = 'lighter';
-  X.globalAlpha = .3 + pulse * .22; X.drawImage(bc, 0, 0, W, H);
-  X.globalAlpha = .1; X.drawImage(bc, -7, -7, W + 14, H + 14);
+  X.globalAlpha = .3 + pulse * .22 + bt * .16; X.drawImage(bc, 0, 0, W, H);
+  X.globalAlpha = .1 + bt * .05; X.drawImage(bc, -7, -7, W + 14, H + 14);
   X.globalAlpha = 1; X.globalCompositeOperation = 'source-over';
   var vg = X.createRadialGradient(W / 2, H / 2, H * .3, W / 2, H / 2, H * .95);
   vg.addColorStop(0, '#0000'); vg.addColorStop(1, 'rgba(12,4,26,' + (.32 + cr * .5) + ')');
@@ -183,10 +205,9 @@ function hud() {
   g.fillStyle = '#fff';
   g.fillRect(bx + bw * (1 - pr) - .5, 5, 1, 7.5 + ghosts.length * 1.9);
   var hy = 21 + ghosts.length * 1.9, i2, sl = spareLeft();
-  g.font = FT(7, 1);
   lab(g, 'HERD ' + (ghosts.length + (st == 2 ? 0 : 1)) + '/' + (allow() + 1) + (best[li] ? '   BEST ' + best[li] : '   PAR ' + (L.p + 1)), bx, hy, 0,
       ghosts.length - (st == 2 ? 1 : 0) > allow() ? '#ff9ec4' : '#fff');
-  g.font = FT(7, 1); lab(g, L.n, W / 2, 22, 1, '#fff');
+  lab(g, L.n, W / 2, 22, 1, '#fff');
   g.font = FT(6.5); lab(g, 'WONDERFULNESS: ' + max(1, M.round((1 - cr) * 100)) + '%', W - 8, 22, 2, cr > .5 ? '#ff9ec4' : 'rgba(255,255,255,.85)');
   // the reserve: 13 spare unicorns for the whole game
   for (i2 = 0; i2 < SPMAX; i2++) {
@@ -194,19 +215,14 @@ function hud() {
     g.globalAlpha = on ? 1 : .22;
     g.fillStyle = on ? RB[i2 % 6] : '#fff';
     g.beginPath(); g.arc(W - 8 - i2 * 6.4 - 3, 31, 2.2, 0, TAU); g.fill();
-    if (on) { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(W - 8 - i2 * 6.4 - 3, 27.4); g.lineTo(W - 9.4 - i2 * 6.4 - 3, 29.6); g.lineTo(W - 6.6 - i2 * 6.4 - 3, 29.6); g.fill() }
   }
   g.globalAlpha = 1;
   g.font = FT(5.5); lab(g, 'SPARE', W - 8 - SPMAX * 6.4 - 8, 33, 2, 'rgba(255,255,255,.6)');
   g.textAlign = 'left';
-  if (pr < .23 && st == 1) {
-    g.textAlign = 'center'; g.font = FT(11, 1); g.fillStyle = '#fff';
-    g.globalAlpha = .8; g.fillText(M.ceil(pr * 13), W / 2, 44); g.globalAlpha = 1; g.textAlign = 'left';
-  }
   if (li < 3 && st == 1) {
     g.font = FT(6); g.fillStyle = 'rgba(255,255,255,.5)';
     g.fillText(touchOn ? 'L/R MOVE   ▲ JUMP   tap top-right: NEW LOOP' :
-      '←→ MOVE    ↑ JUMP    R NEW LOOP    Q UNDO    SHIFT FAST', 8, H - 7);
+      '←→ MOVE ↑ JUMP R NEW LOOP C RETRY Q UNDO SHIFT FAST', 8, H - 7);
   }
   // the one instruction the whole game depends on, shown exactly when it makes sense
   if (li == 1 && st == 1 && !ghosts.length && (plates[0] | plates[1] | plates[2])) {
@@ -221,11 +237,14 @@ function hud() {
     bigText(L.t, W / 2, H / 2 - 6, 19);
     g.globalAlpha = 1; g.textAlign = 'left';
   }
+  if (st == 1 && ghosts.length + 1 > allow() && spareLeft() < 1) {
+    g.globalAlpha = .5 + sin(T * 4) * .3; g.font = FT(7, 1);   // the way out stays on screen
+    lab(g, touchOn ? '\u2161 MENU \u00b7 \u21b6 TAKE ONE BACK' : 'HERD EXHAUSTED \u00b7 Q UNDO \u00b7 ESC MENU', W / 2, H - 20, 1, '#ff9ec4');
+    g.globalAlpha = 1; g.textAlign = 'left';
+  }
   if (denied > 0) {
     g.textAlign = 'center'; g.globalAlpha = min(1, denied * 2);
     bigText('THE HERD IS EXHAUSTED', W / 2, H / 2 - 8, 16);
-    g.font = FT(8, 1); g.fillStyle = '#ffd0e4';
-    g.fillText(touchOn ? 'TAP \u21b6 TO TAKE ONE BACK' : 'PRESS Q TO TAKE ONE BACK', W / 2, H / 2 + 12);
     g.globalAlpha = 1; g.textAlign = 'left';
   }
   if (st == 2) {
@@ -240,14 +259,23 @@ function hud() {
     outline(g, POST[li] || '', W / 2, H - 24, cr > .5 ? '#ffc6dd' : '#fff');
     g.globalAlpha = 1; g.textAlign = 'left';
   }
+  if (pz) {                                        // the world waits for no one - but it will wait here
+    X.fillStyle = 'rgba(10,4,22,.78)'; X.fillRect(0, 0, W, H);
+    X.textAlign = 'center';
+    bigText('PAUSED', W / 2, H * .32, 17);
+    var MI = ['RESUME', 'RESTART', 'MENU'];
+    X.font = FT(9, 1);
+    for (i = 0; i < 3; i++)
+      outline(X, (i == msel ? '\u25b8 ' : '') + MI[i], W / 2, H * .44 + i * 15, i == msel ? '#fff' : 'rgba(255,255,255,.55)');
+    X.textAlign = 'left';
+  }
 }
 function lab(g, s, x, y, al, col) {         // text stays legible on any sky
   g.textAlign = ['left', 'center', 'right'][al];
-  g.strokeStyle = 'rgba(18,6,32,.62)'; g.lineWidth = 2.6; g.lineJoin = 'round';
-  g.strokeText(s, x, y); g.fillStyle = col; g.fillText(s, x, y);
+  outline(g, s, x, y, col);
 }
 function outline(g, s, x, y, col) {
-  g.strokeStyle = 'rgba(16,6,30,.92)'; g.lineWidth = 3; g.lineJoin = 'round';
+  g.strokeStyle = 'rgba(16,6,30,.85)'; g.lineWidth = 3; g.lineJoin = 'round';
   g.strokeText(s, x, y); g.fillStyle = col; g.fillText(s, x, y);
 }
 function bigText(s, x, y, sz) {
@@ -261,8 +289,6 @@ function title() {
   var g = X, i;
   demo.x = W / 2 + sin(T * .9) * 90; demo.f = cos(T * .9) > 0 ? 1 : -1;
   demo.y = H * .62 + abs(sin(T * 2.6)) * -14; demo.an = T * 7; demo.vx = 2; demo.g = 1;
-  g.strokeStyle = '#fff'; g.globalAlpha = .12; g.lineWidth = 2;
-  g.beginPath(); g.moveTo(40, H * .62); g.lineTo(W - 40, H * .62); g.stroke(); g.globalAlpha = 1;
   uni(g, demo, 1, 0, 0, 0);
   g.textAlign = 'center';
   bigText('WONDERFULNESS', W / 2, H * .24, 31);

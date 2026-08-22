@@ -27,6 +27,8 @@ Open `dist/index.html`, or unzip `dist/game.zip`.
 | Jump | `↑` `W` `Z` `Space` | A / d-pad up | `▲` pad |
 | Drop star | `↓` `S` `X` | X | `✦` pad |
 | New loop | `R` / `Enter` | B | top-right `↻` |
+| Retry loop | `C` | stick click | — |
+| Pause menu | `Esc` | Select | top-centre `Ⅱ` |
 | Undo last unicorn | `Q` / `Backspace` | Y | top-right `↶` |
 | Fast-forward | hold `Shift` / `Tab` | shoulder | top-left `»` |
 | Restart level | `T` | start | — |
@@ -157,7 +159,22 @@ function of the ordered input tapes and removes any need for fixpoint iteration.
 single `AudioBuffer` and restarted with every time loop, so it can never desync. It
 is 13 beats with an accent on each second — 13/4 is a subtly wrong meter, which is
 free cosmic horror. One `dread` scalar re-renders it from major to minor, adds a
-detuned sub drone and tape hiss, and drops the hats.
+detuned sub drone and tape hiss, and drops the hats. The accent is *visible*: the
+sun, the bloom pass and the whole world breathe on every second boundary, counted
+from the same `frame` counter that drives the loop — so the pulse cannot drift from
+the song even under fast-forward (there it just pulses five times faster, which
+reads as time compressing).
+
+**Every loop leaves evidence.** Each unicorn records a breadcrumb path as it walks;
+once it becomes a ghost, that route is drawn as faint coloured dots. Planning three
+timed plate-holds means reading three trails, not remembering them.
+
+**Juice budget:** landing puffs for every unicorn, an idle breathing cycle, a
+sparkle shower when the herd re-forms at each loop restart, death shake + flash, a
+countdown ring drawn around *you* in the last three seconds, and gamepad rumble +
+phone haptics on death and win. `prefers-reduced-motion` is respected: no shake.
+The pause menu (Esc) suspends the AudioContext itself, so the song and the frame
+counter freeze together — pausing can never desync the clock from the music.
 
 **The world drains, the rainbows never do.** Desaturation is composited *before* the
 beams are drawn, so as the game decays the world goes grey while the circuitry stays

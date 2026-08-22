@@ -1,5 +1,5 @@
 // ================= RENDER =================
-var T = 0, shake = 0, P = [], RB = ['#f45', '#f83', '#fd4', '#5d6', '#49f', '#a5f'];
+var T = 0, shake = 0, P = [], RB = ['#f45', '#f83', '#fd4', '#5d6', '#49f', '#a5f'], HG = 0;
 var F1 = '"Comic Sans MS","Chalkboard SE",system-ui,sans-serif';
 var F2 = 'ui-monospace,"Courier New",monospace';
 function FT(sz, b) { return (b ? 'bold ' : '') + sz + 'px ' + (cr > .55 ? F2 : F1) }
@@ -38,15 +38,16 @@ function pips(g, x, y, mk, s) {
     g.fillStyle = COL[1 << i]; g.beginPath();
     if (i == 0) { g.moveTo(px, y - s); g.lineTo(px + s, y + s); g.lineTo(px - s, y + s) }
     else if (i == 1) g.rect(px - s * .85, y - s * .85, s * 1.7, s * 1.7);
-    else if (i == 2) g.arc(px, y, s, 0, TAU);
-    else { for (var k = 0; k < 8; k++) { var r = k & 1 ? s * .45 : s * 1.2, an = k * PI / 4 - PI / 2; g[k ? 'lineTo' : 'moveTo'](px + cos(an) * r, y + sin(an) * r) } }
+    else g.arc(px, y, s, 0, TAU);
     g.fill();
   }
 }
 
 // ---------- the unicorn ----------
 function uni(g, a, alp, tint, num, ring) {
-  var fx = a.f, sy = a.sq, sx = 2 - sy, i, ph = a.an, mv = abs(a.vx) > .3 && a.g;
+  var fx = a.f, sy = a.sq, i, ph = a.an, mv = abs(a.vx) > .3 && a.g;
+  if (!mv && a.g && !a.hold) sy *= 1 + sin(T * 2.8) * .04;   // idle breathing
+  var sx = 2 - sy;
   g.save();
   g.translate(a.x, a.y); g.scale(sx * fx, sy); g.globalAlpha = alp;
   // legs
@@ -91,9 +92,9 @@ function uni(g, a, alp, tint, num, ring) {
   if (!tint) { g.fillStyle = 'rgba(255,170,195,.75)'; g.beginPath(); g.moveTo(5.1, -20.4); g.lineTo(5.4, -22.6); g.lineTo(6.3, -20.5); g.fill(); g.fillStyle = '#fff' }
   // horn: a proper tapered spiral, not a triangle
   var bx0 = 7.7, by0 = -20.3, tx0 = 12.8, ty0 = -29.4, q, tq, qx, qy, qw;
-  var hg = g.createLinearGradient(bx0, by0, tx0, ty0);
-  hg.addColorStop(0, '#fff6d2'); hg.addColorStop(.5, '#ffcf5e'); hg.addColorStop(1, '#fffbe8');
-  g.fillStyle = tint || hg;
+  if (!HG) { HG = g.createLinearGradient(bx0, by0, tx0, ty0);
+    HG.addColorStop(0, '#fff6d2'); HG.addColorStop(.5, '#ffcf5e'); HG.addColorStop(1, '#fffbe8') }
+  g.fillStyle = tint || HG;
   g.beginPath(); g.moveTo(bx0 - 1.5, by0 - .5); g.lineTo(bx0 + 1.2, by0 + .9); g.lineTo(tx0, ty0); g.closePath(); g.fill();
   if (!tint) {
     g.strokeStyle = 'rgba(158,104,12,.5)'; g.lineWidth = .5;
@@ -129,39 +130,35 @@ function uni(g, a, alp, tint, num, ring) {
 
 // ---------- tiles ----------
 function chasm(g) {                       // depth under the world so pits read as pits
-  var y0 = gndY - 6, d = g.createLinearGradient(0, y0, 0, H);
-  d.addColorStop(0, 'rgba(30,15,50,0)');
-  d.addColorStop(.3, 'rgba(24,11,42,.55)');
-  d.addColorStop(1, 'rgba(8,3,18,.97)');
-  g.fillStyle = d; g.fillRect(0, y0, W, H - y0);
+  g.fillStyle = chG; g.fillRect(0, gndY - 6, W, H - gndY + 6);
 }
 function tiles(g) {
-  var cx, cy, i, t, p, x, y;
+  var cx, cy, i, t, p, x, y, w = cr > .6;
   for (cy = 0; cy < GH; cy++) for (cx = 0; cx < GW; cx++) {
     i = idx(cx, cy); t = TT[i]; if (!t) continue;
     p = TP[i]; x = cx * TS; y = cy * TS;
     if (t == SOLID) {
       var up = cy > 0 && (TT[i - GW] == 0 || TT[i - GW] == CLOUD || TT[i - GW] == GOAL);
       var dn = cy < GH - 1 && TT[i + GW] != SOLID && TT[i + GW] != PLATE;
-      g.fillStyle = cr > .6 ? '#3b3048' : '#b4794e';
+      g.fillStyle = w ? '#3b3048' : '#b4794e';
       if (dn) {                                   // tapered underside: a floating island
         g.beginPath(); g.moveTo(x, y); g.lineTo(x + TS, y);
         g.lineTo(x + TS - 2.5, y + TS - 1); g.lineTo(x + 2.5, y + TS - 1); g.closePath(); g.fill();
       } else g.fillRect(x, y, TS, TS);
-      g.fillStyle = cr > .6 ? '#2e2539' : '#96603c';
+      g.fillStyle = w ? '#2e2539' : '#96603c';
       if (dn) { g.beginPath(); g.moveTo(x + 1, y + TS - 5); g.lineTo(x + TS - 1, y + TS - 5); g.lineTo(x + TS - 2.5, y + TS - 1); g.lineTo(x + 2.5, y + TS - 1); g.closePath(); g.fill() }
       else g.fillRect(x, y + TS - 4, TS, 4);
       if (up) {
-        g.fillStyle = cr > .6 ? '#44614f' : '#6fc97c';
+        g.fillStyle = w ? '#44614f' : '#6fc97c';
         g.beginPath(); g.moveTo(x, y + 6);
         for (var k = 0; k <= 4; k++) g.lineTo(x + k * 4, y + (k & 1 ? 1 : 3.6));
         g.lineTo(x + TS, y + 6); g.fill();
-        g.fillStyle = cr > .6 ? '#688a75' : '#a9ef92';
+        g.fillStyle = w ? '#688a75' : '#a9ef92';
         g.fillRect(x, y + 4.4, TS, 1.6);
         if ((cx * 7 + cy * 13) % 5 == 0) flower(g, x + 8, y + 1, cx + cy);
       }
     } else if (t == CLOUD) {
-      g.fillStyle = cr > .6 ? 'rgba(190,180,205,.85)' : 'rgba(255,255,255,.93)';
+      g.fillStyle = w ? 'rgba(190,180,205,.85)' : 'rgba(255,255,255,.93)';
       g.beginPath();
       g.ellipse(x + 4, y + 6, 5, 4.2, 0, 0, TAU); g.ellipse(x + 12, y + 6, 5, 4.2, 0, 0, TAU);
       g.ellipse(x + 8, y + 4.5, 6, 4.6, 0, 0, TAU); g.fill();
@@ -354,13 +351,13 @@ function sky(g) {
     skyG.addColorStop(0, top); skyG.addColorStop(1, bot);
   }
   g.fillStyle = skyG; g.fillRect(-400, -400, W + 800, H + 800);
-  // sun / hole
-  var sx = W * .78, sy = H * .17;
+  // sun / hole - it breathes with the clock
+  var sx = W * .78, sy = H * .17, sr = 70 + bt * 7;
   g.globalCompositeOperation = 'lighter';
-  var sg = g.createRadialGradient(sx, sy, 2, sx, sy, 70);
+  var sg = g.createRadialGradient(sx, sy, 2, sx, sy, sr);
   sg.addColorStop(0, cr > .6 ? 'rgba(255,80,140,.35)' : 'rgba(255,250,200,.42)');
   sg.addColorStop(1, 'rgba(255,240,180,0)');
-  g.fillStyle = sg; g.beginPath(); g.arc(sx, sy, 70, 0, TAU); g.fill();
+  g.fillStyle = sg; g.beginPath(); g.arc(sx, sy, sr, 0, TAU); g.fill();
   g.globalCompositeOperation = 'source-over';
   // a rainbow arc in the sky: the thing the whole world is named after,
   // slowly coming apart as wonderfulness drains
@@ -422,7 +419,7 @@ var TB = [
   [.0, .46, .13, .54, '\u25c0', 1, 0], [.13, .46, .14, .54, '\u25b6', 2, 0],
   [.72, .46, .15, .54, '\u25b2', 4, 0], [.87, .46, .13, .54, '\u2726', 8, 0],
   [.87, 0, .13, .28, '\u21ba', 0, 1], [.74, 0, .13, .28, '\u21b6', 0, 2],
-  [.0, 0, .13, .28, '\u00bb', 0, 4],
+  [.0, 0, .13, .28, '\u00bb', 0, 4], [.43, 0, .14, .28, '\u2161', 0, 128],
 ];
 function touchUI(g) {
   if (!touchOn) return;

@@ -1,9 +1,8 @@
 // ================= SIMULATION =================
-var TT, TP, racc, bfloor, plates = [0, 0, 0], plateBy = [-1, -1, -1], power = 0, pulse = 0;
+var TT, TP, racc, bfloor, plates = [0, 0, 0], plateBy = [-1, -1, -1], power = 0, pulse = 0, pwOld = 0;
 var segs = [], spX, spY, stX, stY, hasStar, hintX = 0, hintY = 0, goalX = 0, goalY = 0, everPressed = 0, gndY = 224;
 var LOOPF = 780;                       // 13 seconds @ 60
 var ghosts = [], actors = [], rec, frame = 0, star = 0, pl;
-var MAXG = 20;
 
 function idx(cx, cy) { return cy * GW + cx }
 
@@ -29,6 +28,7 @@ function parseLevel(m) {
 }
 
 // find the top of the main floor slab, so the chasm shading only darkens actual pits
+var chG = 0;
 function findGround() {
   var y, x, cnt, t, gnd = GH;
   for (y = GH - 1; y >= 0; y--) {
@@ -38,6 +38,11 @@ function findGround() {
     gnd = y;
   }
   gndY = gnd * TS;
+  var y0 = gndY - 6;
+  chG = X.createLinearGradient(0, y0, 0, H);
+  chG.addColorStop(0, 'rgba(30,15,50,0)');
+  chG.addColorStop(.3, 'rgba(24,11,42,.55)');
+  chG.addColorStop(1, 'rgba(8,3,18,.97)');
 }
 
 // ---------- collision queries ----------
@@ -66,7 +71,7 @@ function boxSolid(x, y, w, h) {
 var AW = 5, AH = 12;
 function mkActor(i) {
   return { i: i, x: spX, y: spY, vx: 0, vy: 0, g: 0, pg: 0, f: 1, ct: 0, jb: 0, pj: 0,
-           dead: 0, hold: 0, sq: 1, an: 0, tr: [], born: 0 };
+           dead: 0, hold: 0, sq: 1, an: 0, pt: [] };
 }
 function mvX(a, dx) {
   a.x += dx;
@@ -113,11 +118,17 @@ function stepActor(a, k, isP) {
   a.vy += .42; if (a.vy > 7.4) a.vy = 7.4;
   a.pg = a.g; a.g = 0;
   mvX(a, a.vx); mvY(a, a.vy);
-  if (a.g) { if (!a.pg && a.vy > 3) { a.sq = .62; if (isP) sfx(1) } a.ct = 7 } else if (a.ct) a.ct--;
+  if (a.g) {
+    if (!a.pg && a.vy > 3) {
+      a.sq = .62; if (isP) sfx(1);
+      for (var zi = 0; zi < 5; zi++)                       // landing puff
+        pp(a.x + rnd(zi * 9 + a.x) * 9 - 4.5, a.y, rnd(zi * 3) * 1.8 - .9, -rnd(zi * 7) * 1.3, 12 + zi * 3, 0, 1.1);
+    }
+    a.ct = 7;
+  } else if (a.ct) a.ct--;
   a.sq += (1 - a.sq) * .22;
   a.an += a.g ? abs(a.vx) * .18 : .06;
-  // trail for mane
-  a.tr.unshift(a.x, a.y); if (a.tr.length > 16) a.tr.length = 16;
+  if (!(frame % 7)) a.pt.push(a.x, a.y - 8);
   // hazards
   var cx = flr(a.x / TS), cy = flr((a.y - 6) / TS);
   if (cx >= 0 && cx < GW && cy >= 0 && cy < GH) {
@@ -188,7 +199,7 @@ function traceBeams() {
   var np = 0;
   for (i = 0; i < GW * GH; i++) if (TT[i] == RECV && (racc[i] & TP[i]) == TP[i]) np |= TP[i];
   if (star && star.in) np |= 8;
-  if (np != power) { sfx(np > power ? 2 : 11); pulse = 1 }
+  if (np != power) { sfx(np > power ? 2 : 10); pulse = 1 }
   power = np;
 }
 
@@ -200,6 +211,8 @@ function resetWorld() {
   for (var i = 0; i <= ghosts.length; i++) actors.push(mkActor(i));
   pl = actors[ghosts.length];
   star = hasStar ? { x: stX, y: stY, vx: 0, vy: 0, h: 0, in: 0, cd: 0 } : 0;
+  for (var ri = 0; ri < actors.length; ri++)          // the herd re-forms in a shower
+    burst(spX, spY - 9, ri < ghosts.length ? 7 : 8, 3);
   rec = new Uint8Array(LOOPF);
   bfloor.fill(0); racc.fill(0); segs.length = 0;
   musStart();                       // the song restarts with the loop: music IS the clock
@@ -207,8 +220,7 @@ function resetWorld() {
 function commitLoop() {
   if (frame < 5) { sfx(6); resetWorld(); return }
   if (ghosts.length + 1 > allow() && spareLeft() < 1) { denied = 2.6; sfx(6); return }
-  if (ghosts.length >= MAXG) { sfx(6); return }
-  ghosts.push({ i: rec.slice(0, frame), n: frame }); sfx(5);
+  ghosts.push({ i: rec.slice(0, frame), n: frame, pt: pl.pt }); sfx(5);
   resetWorld();
 }
 function undoLoop() { if (ghosts.length) { ghosts.pop(); sfx(6) } resetWorld() }
@@ -259,6 +271,8 @@ function step() {
     press(a.x, a.y + 2, AW, i);
   }
   if (star && !star.h && !star.in) press(star.x, star.y + 7, 4, -2);
+  var pw = plates[0] | plates[1] << 1 | plates[2] << 2;
+  if (pw != pwOld) { sfx(8); pwOld = pw }          // a plate just clicked down or up
   traceBeams();
   frame++;
 }

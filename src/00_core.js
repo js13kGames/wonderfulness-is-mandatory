@@ -61,9 +61,10 @@ var DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
 // three sources OR'd into one action map: 1=left 2=right 4=jump 8=action
 // meta: 1=new loop 2=undo 4=fast-forward 8=restart level 16=any-key 32=mute
 var K = 0, KP = 0, meta = 0, MP = 0, kbK = 0, kbM = 0, tK = 0, tM = 0, gpK = 0, gpM = 0, anyK = 0;
-var kmap = { ArrowLeft: 1, KeyA: 1, ArrowRight: 2, KeyD: 2, ArrowUp: 4, KeyW: 4, Space: 4, KeyZ: 4, KeyK: 4,
-             KeyX: 8, ArrowDown: 8, KeyS: 8, KeyL: 8 };
-var mmap = { KeyR: 1, Enter: 1, KeyQ: 2, Backspace: 2, KeyE: 2, ShiftLeft: 4, ShiftRight: 4, Tab: 4, KeyT: 8, KeyM: 32 };
+var kmap = { ArrowLeft: 1, KeyA: 1, ArrowRight: 2, KeyD: 2, ArrowUp: 4, KeyW: 4, Space: 4, KeyZ: 4,
+             KeyX: 8, ArrowDown: 8, KeyS: 8 };
+var mmap = { KeyR: 1, Enter: 1, KeyQ: 2, Backspace: 2, ShiftLeft: 4, ShiftRight: 4, Tab: 4,
+             KeyT: 8, KeyM: 32, KeyC: 64, Escape: 128 };
 onkeydown = e => {
   if (e.metaKey || e.ctrlKey) return;
   if (e.code == 'Tab' || e.code == 'Space' || e.code.slice(0, 5) == 'Arrow') e.preventDefault();
@@ -74,6 +75,8 @@ onblur = () => { kbK = kbM = 0 };
 
 var touchOn = 0;
 try { touchOn = matchMedia('(pointer:coarse)').matches ? 1 : 0 } catch (e) {}
+var RM = 0;                            // prefers-reduced-motion: no shake, no iris wipe
+try { RM = +matchMedia('(prefers-reduced-motion:reduce)').matches } catch (e) {}
 function tpt(t) { return [(t.clientX - OX) / SC, (t.clientY - OY) / SC] }
 function tupd(e) {
   e.preventDefault(); touchOn = 1; anyK = 1; A0();
@@ -82,6 +85,7 @@ function tupd(e) {
     p = tpt(e.touches[i]);
     if (p[1] > H * .46) k |= p[0] < W * .13 ? 1 : p[0] < W * .27 ? 2 : p[0] > W * .87 ? 8 : p[0] > W * .72 ? 4 : 0;
     else if (p[0] > W * .87) m |= 1; else if (p[0] > W * .74) m |= 2; else if (p[0] < W * .13) m |= 4;
+    else if (p[0] > W * .43 && p[0] < W * .57) m |= 128;
   }
   tK = k; tM = m;
 }
@@ -104,8 +108,15 @@ function pad() {
   if (b(3)) m |= 2;
   if (b(5) || b(7) || b(4) || b(6)) m |= 4;
   if (b(9)) m |= 8;
+  if (b(10)) m |= 64;
+  if (b(8)) m |= 128;
   if (k | m) anyK = 1;
   gpK = k; gpM = m;
+}
+function buzz(ms, s) {                 // gamepad rumble + phone haptics; silent no-op elsewhere
+  var g = self.navigator && navigator.getGamepads && navigator.getGamepads()[0], v = g && g.vibrationActuator;
+  if (v) try { v.playEffect('dual-rumble', { duration: ms, strongMagnitude: s }) } catch (e) {}
+  try { if (self.navigator && navigator.vibrate) navigator.vibrate(ms) } catch (e) {}
 }
 function inputPoll() {
   pad();
