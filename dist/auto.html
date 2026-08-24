@@ -1,0 +1,1642 @@
+<!DOCTYPE html><html lang=en><meta charset=utf-8><title>auto</title><body style="margin:0"><canvas id=c></canvas>
+<script>// ============ THE LAST UNICORN ============
+// world grid
+var TS = 16, GW = 30, GH = 17, W = GW * TS, H = GH * TS;
+var X = c.getContext('2d');
+
+// bloom buffer (1/3 res)
+var bc = document.createElement('canvas'), BX;
+bc.width = 240; bc.height = 136; BX = bc.getContext('2d');
+
+var VW = 1, VH = 1, SC = 1, OX = 0, OY = 0, DPR = 1, port = 0;
+function resize() {
+  DPR = Math.min(2, devicePixelRatio || 1);
+  VW = innerWidth; VH = innerHeight;
+  c.width = VW * DPR | 0; c.height = VH * DPR | 0;
+  c.style.width = VW + 'px'; c.style.height = VH + 'px';
+  port = touchOn && VH > VW * 1.2;
+  SC = Math.min(VW / W, VH / H);
+  OX = (VW - W * SC) / 2; OY = (VH - H * SC) * (port ? .3 : .5);
+}
+onresize = resize;
+
+// ---- math ----
+var M = Math, PI = M.PI, TAU = PI * 2;
+var sin = M.sin, cos = M.cos, abs = M.abs, min = M.min, max = M.max, flr = M.floor, hyp = M.hypot;
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v }
+function lerp(a, b, t) { return a + (b - a) * t }
+// deterministic hash-noise (never used in sim, only decor)
+function rnd(n) { n = sin(n * 127.1 + 311.7) * 43758.5453; return n - flr(n) }
+
+// ---- tile ids ----
+var EMPTY = 0, SOLID = 1, CLOUD = 2, THORN = 3, GOAL = 4, EMIT = 5, MIRR = 6,
+    PRIS = 7, FILT = 8, RECV = 9, DOOR = 10, PLATE = 11, SOCK = 12;
+
+// grid char -> [type, param]
+// param: EMIT=dir | MIRR = orient | (grp+1)<<1 | FILT/RECV/DOOR = colour mask | PLATE = grp
+var CH = {};
+function def(s, t, f) { for (var i = 0; i < s.length; i++) CH[s[i]] = [t, f(i, s[i])] }
+def('#', SOLID, () => 0);
+def('=', CLOUD, () => 0);
+def('x', THORN, () => 0);
+def('C', GOAL, () => 0);
+def('><v^', EMIT, i => [0, 2, 1, 3][i]);          // right left down up
+def('/\\', MIRR, i => i);                          // fixed mirrors
+def('AaDdEe', MIRR, i => (i & 1) | ((i >> 1) + 1) << 1); // toggle: grp 0,1,2
+def('p', PRIS, () => 0);
+def('rgbykm', FILT, i => [1, 2, 4, 3, 6, 5][i]);
+def('RGBYKM', RECV, i => [1, 2, 4, 3, 6, 5][i]);
+def('W', RECV, () => 7);
+def('123456789', DOOR, i => i + 1);
+def('!@$', PLATE, i => i);
+def('O', SOCK, () => 0);
+
+// colour by mask (0..8 used)
+var COL = [, '#f24', '#4e6', '#fd4', '#49f', '#f5e', '#5ef', '#fff', '#fc3'];
+// darker rim
+var COLD = [, '#801', '#180', '#951', '#026', '#809', '#088', '#889', '#940'];
+
+// direction vectors  0=R 1=D 2=L 3=U
+var DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
+
+// ---- input ----
+// three sources OR'd into one action map: 1=left 2=right 4=jump 8=action
+// meta: 1=new loop 2=undo 4=fast-forward 8=restart level 16=any-key 32=mute
+var K = 0, KP = 0, meta = 0, MP = 0, kbK = 0, kbM = 0, tK = 0, tM = 0, gpK = 0, gpM = 0, anyK = 0;
+var kmap = { ArrowLeft: 1, KeyA: 1, ArrowRight: 2, KeyD: 2, ArrowUp: 4, KeyW: 4, Space: 4, KeyZ: 4,
+             KeyX: 8, ArrowDown: 8, KeyS: 8 };
+var mmap = { KeyR: 1, Enter: 1, KeyQ: 2, Backspace: 2, ShiftLeft: 4, ShiftRight: 4, Tab: 4,
+             KeyT: 8, KeyM: 32, KeyC: 64, Escape: 128 };
+onkeydown = e => {
+  if (e.metaKey || e.ctrlKey) return;
+  if (e.code == 'Tab' || e.code == 'Space' || e.code.slice(0, 5) == 'Arrow') e.preventDefault();
+  kbK |= kmap[e.code] | 0; kbM |= mmap[e.code] | 0; anyK = 1; A0();
+};
+onkeyup = e => { kbK &= ~(kmap[e.code] | 0); kbM &= ~(mmap[e.code] | 0) };
+onblur = () => { kbK = kbM = 0 };
+
+var touchOn = 'ontouchstart' in self;
+var RM = 0;
+try { RM = +matchMedia('(prefers-reduced-motion:reduce)').matches } catch (e) {}
+function tpt(t) { return [(t.clientX - OX) / SC, (t.clientY - OY) / SC] }
+function tupd(e) {
+  e.preventDefault(); touchOn = 1; anyK = 1; A0();
+  var k = 0, m = 0, i, p, q, sx, sy, ddx, ddy, ph;
+  for (i = 0; i < e.touches.length; i++) {
+    sx = e.touches[i].clientX; sy = e.touches[i].clientY;
+    if (!port) {
+      p = tpt(e.touches[i]);
+      if (p[1] > H * .46) k |= p[0] < W * .13 ? 1 : p[0] < W * .27 ? 2 : p[0] > W * .87 ? 8 : p[0] > W * .72 ? 4 : 0;
+      else if (p[0] > W * .87) m |= 1; else if (p[0] > W * .74) m |= 2; else if (p[0] < W * .13) m |= 4;
+      else if (p[0] > W * .43 && p[0] < W * .57) m |= 128;
+    } else {
+      ph = VH - (OY + H * SC);
+      if (sy < OY + H * SC) { k |= 4; continue }          // screen tap: jump / begin / skip
+      ddx = sx - VW * .2; ddy = sy - OY - H * SC - ph * .36;
+      var rr = M.min(ph * .19, VW * .125);
+      if (ddx * ddx + ddy * ddy < rr * rr * 1.25) {        // d-pad cross
+        if (abs(ddx) > abs(ddy)) k |= ddx < 0 ? 1 : 2; else k |= ddy < 0 ? 4 : 8;
+      } else if (abs(sx - VW * .8) < rr * .8 && abs(ddy) < rr * .8) k |= 4;   // A
+      if (abs(sy - (OY + H * SC + ph * .78)) < ph * .065)
+        for (q = 0; q < 4; q++)
+          if (sx > VW * (.26 + q * .125) && sx < VW * (.26 + q * .125 + .105))
+            m |= [2, 128, 4, 1][q];
+    }
+  }
+  tK = k; tM = m;
+}
+addEventListener('touchstart', tupd, { passive: 0 });
+addEventListener('touchmove', tupd, { passive: 0 });
+addEventListener('touchend', tupd, { passive: 0 });
+addEventListener('touchcancel', tupd, { passive: 0 });
+addEventListener('pointerdown', () => { anyK = 1; A0() });
+
+function pad() {
+  var g = navigator.getGamepads ? navigator.getGamepads()[0] : 0, k = 0, m = 0, b, i;
+  if (!g) { gpK = gpM = 0; return }
+  b = i => g.buttons[i] && g.buttons[i].pressed;
+  var ax = g.axes[0] || 0;
+  if (ax < -.4 || b(14)) k |= 1;
+  if (ax > .4 || b(15)) k |= 2;
+  if (b(0) || b(12)) k |= 4;
+  if (b(2) || b(13)) k |= 8;
+  if (b(1)) m |= 1;
+  if (b(3)) m |= 2;
+  if (b(5) || b(7) || b(4) || b(6)) m |= 4;
+  if (b(9)) m |= 8;
+  if (b(10)) m |= 64;
+  if (b(8)) m |= 128;
+  if (k | m) anyK = 1;
+  gpK = k; gpM = m;
+}
+function buzz(ms, s) {                 // gamepad rumble + phone haptics; silent no-op elsewhere
+  var g = self.navigator && navigator.getGamepads && navigator.getGamepads()[0], v = g && g.vibrationActuator;
+  if (v) try { v.playEffect('dual-rumble', { duration: ms, strongMagnitude: s }) } catch (e) {}
+  try { if (self.navigator && navigator.vibrate) navigator.vibrate(ms) } catch (e) {}
+}
+function inputPoll() {
+  pad();
+  var nk = kbK | tK | gpK, nm = kbM | tM | gpM;
+  KP = nk & ~K; K = nk;
+  MP = (nm & ~meta) | (anyK ? 16 : 0); meta = nm; anyK = 0;
+  if (MP & 32) { MUT ^= 1; if (MUT) musStop(); else musStart() }
+}
+
+// ================= AUDIO =================
+// The music loop is EXACTLY 13.000s and restarts with every time loop, so the
+// song is the clock: 13 beats, one accent per second. 13/4 is a subtly wrong
+// meter, which is free cosmic horror.
+var A = 0, MG, MUT = 0, cr = 0, MBUF = 0, MSRC = 0, MCR = -1, sq = 1;
+function A0() {
+  if (A) { if (A.state == 'suspended') A.resume(); return }
+  A = new (self.AudioContext || self.webkitAudioContext)();
+  MG = A.createGain(); MG.gain.value = .55;
+  var cmp = A.createDynamicsCompressor();
+  MG.connect(cmp); cmp.connect(A.destination);
+  musStart();
+}
+function rnf() { sq = (sq * 1103515245 + 12345) & 2147483647; return sq / 1073741824 - 1 }
+
+// ---- one-shot voices (sfx) ----
+function tone(f, t, d, ty, v, sl) {
+  if (!A || MUT) return;
+  var o = A.createOscillator(), g = A.createGain();
+  o.type = ty; o.frequency.setValueAtTime(f, t);
+  if (sl != 1) o.frequency.exponentialRampToValueAtTime(max(24, f * sl), t + d);
+  g.gain.setValueAtTime(1e-4, t);
+  g.gain.exponentialRampToValueAtTime(v, t + .006);
+  g.gain.exponentialRampToValueAtTime(1e-4, t + d);
+  o.connect(g); g.connect(MG); o.start(t); o.stop(t + d + .03);
+}
+// 0 jump 1 land 2 power 3 socket 4 grab 5 loop 6 nope 7 win 8 tick 9 alarm 10 poof 11 unpower
+var SFX = [
+  [430, .1, 0, .17, 2.3], [150, .07, 1, .15, .6], [700, .13, 3, .12, 1.5],
+  [520, .2, 3, .13, 2], [880, .07, 0, .11, 1.6], [300, .3, 1, .14, .35],
+  [90, .16, 2, .12, .8], [523, .45, 3, .18, 2], [1500, .02, 0, .04, 1],
+  [1900, .05, 0, .09, .7], [420, .16, 2, .1, .5],
+];
+var vc = 0, vt = 0;
+function sfx(n) {
+  if (!A || MUT) return;
+  var t = A.currentTime;
+  if (t != vt) { vt = t; vc = 0 }
+  if (++vc > 4) return;                       // voice cap: 5 ghosts landing at once must not clip
+  var s = SFX[n], dt = (vc - 1) * .012;
+  tone(s[0] * (1 + dt), t + dt, s[1], ['square', 'triangle', 'sawtooth', 'sine'][s[2]], s[3], s[4]);
+  if (n == 5) tone(s[0] * 1.5, t + .05, .25, 'triangle', .1, .4);
+  if (n == 3 || n == 7) for (var i = 1; i < 4; i++) tone(s[0] * (1 + i * .26), t + i * .07, .3, 'triangle', .11, 1.3);
+}
+
+// ---- the 13 second song ----
+function nf(n) { return 261.63 * M.pow(2, n / 12) }
+// wave: 0 square 1 tri 2 saw 3 sine 4 noise
+function put(d, N, sr, t0, dur, f, amp, wave, dec) {
+  var i0 = t0 * sr | 0, n = dur * sr | 0, ph = 0, dp = f / sr, i, v, e, at = sr * .004;
+  for (i = 0; i < n; i++) {
+    e = min(1, i / at) * M.pow(1 - i / n, dec);
+    ph += dp; ph -= ph | 0;
+    v = wave == 0 ? (ph < .5 ? 1 : -1) : wave == 1 ? 4 * abs(ph - .5) - 1
+      : wave == 2 ? 2 * ph - 1 : wave == 3 ? sin(ph * TAU) : rnf();
+    d[(i0 + i) % N] += v * e * amp;
+  }
+}
+var MEL = "H E A E H   J H L H C H L   J H J E A E J   M L F E ";
+function renderSong(dr) {
+  var sr = A.sampleRate, N = M.round(13 * sr), buf = A.createBuffer(1, N, sr), d = buf.getChannelData(0);
+  var STEP = .25, S = 52, i, s, beat, rt, th, fi, ch, n, det = 1 - dr * .014;
+  th = dr > .3 ? 3 : 4; fi = dr > .7 ? 6 : 7;
+  sq = 1;
+  for (s = 0; s < S; s++) {
+    var t = s * STEP; beat = s >> 2;
+    rt = [0, 0, 0, 0, 7, 7, 7, 7, 9, 9, 9, 9, 5][beat];
+    ch = [rt, rt + th, rt + fi];
+    if (!(s & 3)) {                                   // one accent per second: the clock
+      put(d, N, sr, t, .3, nf(rt - 24) * det, .3, 1, 2.4);
+      put(d, N, sr, t, .05, 60, .18 * (1 - dr * .4), 4, 6);
+    }
+    put(d, N, sr, t, .16, nf(ch[s % 3] - 12 + (s % 8 > 3 ? 12 : 0)) * det, .07, dr > .6 ? 1 : 0, 3);
+    n = MEL.charCodeAt(s) - 65;
+    if (n >= 0) {
+      if (dr > .3 && (n == 4 || n == 9 || n == 11)) n--;
+      put(d, N, sr, t, .3, nf(n) * det, .1, dr > .55 ? 2 : 0, 2.6);
+    }
+    if ((s & 1) && dr < .8) put(d, N, sr, t, .035, 9000, .035 * (1 - dr), 4, 5);
+    if (dr > .35 && !(s % 16)) put(d, N, sr, t, 4.2, nf(rt - 36) * 1.006, .1 * dr, 2, .35);
+  }
+  if (dr > .5) for (i = 0; i < N; i++) d[i] += rnf() * .006 * dr;    // tape hiss
+  for (i = 0; i < N; i++) d[i] = clamp(d[i], -.92, .92);
+  return buf;
+}
+function musStart() {
+  if (!A || MUT) return;
+  var k = M.round(cr * 4) / 4;
+  if (MCR != k) { MCR = k; MBUF = renderSong(k) }
+  if (MSRC) try { MSRC.stop() } catch (e) {}
+  MSRC = A.createBufferSource(); MSRC.buffer = MBUF; MSRC.loop = 1;
+  MSRC.connect(MG); MSRC.start();
+}
+function musStop() { if (MSRC) { try { MSRC.stop() } catch (e) {} MSRC = 0 } }
+
+// ================= LEVELS =================
+// generated by test/gen.js from levels/*.txt - edit those, not this
+var LEV = [
+{n:"A PERFECTLY NORMAL MEADOW",t:"EVERYTHING IS WONDERFUL!",p:0,m:
+`..............................
+..............................
+..............................
+..>.........r.......R.........
+..............................
+..............................
+..............................
+..............................
+..............................
+..............................
+....................1.........
+....................1.........
+....................1.........
+...S................1.....C...
+##############################
+##############################
+##############################`},
+
+{n:"THE FIRST OF YOU",t:"",p:1,m:
+`##############################
+#............................#
+#v...........................#
+#............................#
+#A..........................W#
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#...................7........#
+#...................7........#
+#...................7........#
+#.S.................7....C...#
+######!#######################
+##############################
+##############################`},
+
+{n:"WALK ON IT",t:"EVERYTHING IS STILL WONDERFUL!",p:1,m:
+`##############################
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#............................#
+#.S.......................C..#
+#####!######..........A#######
+############...........#######
+############xxxxxxxxxx^#######`},
+
+{n:"YOUR BRIDGE IS ON LOAN",t:"",p:1,m:
+`..............................
+..............................
+..............................
+..............................
+..........v...................
+..............................
+..............................
+..............................
+..............................
+..............................
+........................1.....
+........................1.....
+........................1.....
+.S......................1..C..
+###!#####RA..........#########
+###########..........#########
+###########..........#########`},
+
+{n:"TWO PLACES AT ONCE",t:"PLEASE REMAIN WONDERFUL.",p:1,m:
+`..............................
+..............................
+..............................
+..........v...................
+..............................
+..............................
+..............................
+.........R....................
+..............................
+..............................
+........................1.....
+........................1.....
+........................1.....
+.S......................1..C..
+##!##@###DA..........#########
+###########..........#########
+###########..........#########`},
+
+{n:"STAND IN THE LIGHT",t:"",p:2,m:
+`..............................
+....v.........................
+..............G...\\...........
+..............................
+..............................
+..............................
+..............................
+..............................
+..............................
+..............................
+..............................
+..............................
+..............................
+.S..........................C.
+####R###111111####^##222222###
+########......#######......###
+########......#######......###`},
+
+{n:"THE OBLIGING CRYSTAL",t:"WONDERFULNESS IS MANDATORY.",p:2,m:
+`..............................
+..........#...................
+..............................
+.>........A.....#.............
+..............................
+..............................
+.......#..p.....D..........#..
+...........................#..
+...........................#..
+..........#........v.......#..
+................R..........1..
+...........................1..
+...........................1..
+.S.........................1.C
+###!###@###$#######E......####
+####################......####
+####################......####`},
+
+{n:"TWO COLOURS, ONE OF YOU",t:"",p:2,m:
+`..............................
+........#...........v.........
+..............................
+............../.....d#...#....
+..>.....A................#....
+..............g..........#....
+.........................#....
+.........................#....
+........\\..r..Y..........#....
+.................v.......#....
+.........................3....
+.........................3....
+.........................3....
+.S.......................3.C..
+###!###@###$#####E......######
+##################......######
+##################......######`},
+
+{n:"A STAR FOR THE COLLECTION",t:"",p:3,m:
+`..............................
+..............................
+.......>......E...............
+..............................
+...........v.........v........
+..............................
+..............................
+..............................
+..............R...............
+..............................
+..8.......1...................
+..8.......1...................
+..8...O...1...................
+C.8.S.....1.................*.
+###!#@##$##A.......##D......##
+############.......###......##
+############.......###......##`},
+
+{n:"THE THREE STATUES",t:"YOU HAVE ALWAYS BEEN THIS MANY.",p:4,m:
+`..............................
+..............................
+..............................
+>....A........................
+..............................
+..............................
+..............................
+..............................
+....#D..........E...3.........
+v...................3.........
+b...................3.........
+....................3.........
+....................3.........
+.S..................3.......C.
+B##!######@#####Y#$###444444##
+######################xxxxxx##
+##############################`},
+
+{n:"A BODY IS A COMPONENT",t:"",p:4,m:
+`............#.................
+..............................
+.>..........A.................
+.......B........R.............
+..............................
+..............................
+.................#########....
+.......E....p...d#########....
+.................#########....
+.................#########....
+.................#####5###....
+.................#####5###....
+......................5.......
+.S....................5.....C.
+##!#@#$#####G####222222222####
+#################xxxxxxxxx####
+##############################`},
+
+{n:"THE HERD IS A NUMBER",t:"DO NOT COUNT THE UNICORNS.",p:5,m:
+`.......#.........v............
+..............................
+>......A......................
+..............................
+.................k............
+..............................
+../....p...R.............###..
+.........................###..
+.........................###..
+.........................###..
+............./...p.......#3#..
+....#..E...G.............#3#..
+.........................#3#..
+.S........................3.C.
+##B#!###@##$#B###D......#444##
+##################xxxxxx#xxx##
+##############################`},
+
+{n:"WALK INTO THE LIGHT",t:"THERE WAS ONLY EVER ONE.",p:3,m:
+`..............................
+..............................
+.>..........................\\.
+..............................
+..............................
+........v......v......v.......
+..............................
+..............................
+..............................
+..............................
+..............................
+..............................
+..............................
+.S..........................C.
+##!#@#$#A.....#D.....#E.....##
+#########xxxxx##xxxxx##xxxxx##
+#########xxxxx##xxxxx##xxxxx##`}
+];
+
+// ================= SIMULATION =================
+var TT, TP, racc, bfloor, plates = [0, 0, 0], plateBy = [-1, -1, -1], power = 0, pulse = 0, pwOld = 0;
+var segs = [], spX, spY, stX, stY, hasStar, gndY = 224;
+var LOOPF = 780;                       // 13 seconds @ 60
+var ghosts = [], actors = [], rec, frame = 0, star = 0, pl;
+
+function idx(cx, cy) { return cy * GW + cx }
+
+function parseLevel(m) {
+  TT = new Uint8Array(GW * GH); TP = new Uint8Array(GW * GH);
+  racc = new Uint8Array(GW * GH); bfloor = new Uint8Array(GW * GH);
+  hasStar = 0; spX = 24; spY = 100;
+  var rows = m.split('\n'), y, x, ch, d;
+  for (y = 0; y < GH; y++) {
+    for (x = 0; x < GW; x++) {
+      ch = (rows[y] || '')[x] || '.';
+      if (ch == 'S') { spX = x * TS + 8; spY = y * TS + 15.99; continue }
+      if (ch == '*') { hasStar = 1; stX = x * TS + 8; stY = y * TS + 11; continue }
+      d = CH[ch];
+      if (d) {
+        TT[idx(x, y)] = d[0]; TP[idx(x, y)] = d[1];
+      }
+    }
+  }
+  findGround();
+}
+
+// find the top of the main floor slab, so the chasm shading only darkens actual pits
+var chG = 0;
+function findGround() {
+  var y, x, cnt, t, gnd = GH;
+  for (y = GH - 1; y >= 0; y--) {
+    cnt = 0;
+    for (x = 0; x < GW; x++) { t = TT[idx(x, y)]; if (t == SOLID || t == PLATE || t == DOOR) cnt++ }
+    if (cnt < 6) break;
+    gnd = y;
+  }
+  gndY = gnd * TS;
+  var y0 = gndY - 6;
+  chG = X.createLinearGradient(0, y0, 0, H);
+  chG.addColorStop(0, 'rgba(30,15,50,0)');
+  chG.addColorStop(.3, 'rgba(24,11,42,.55)');
+  chG.addColorStop(1, 'rgba(8,3,18,.97)');
+}
+
+// ---------- collision queries ----------
+function solidCell(cx, cy) {
+  if (cy >= GH) return 0;            // the world has no floor - pits are bottomless
+  if (cx < 0 || cy < 0 || cx >= GW) return 1;
+  var i = idx(cx, cy), t = TT[i];
+  if (t == DOOR) return (power & TP[i]) == TP[i] ? 0 : 1;
+  return t == SOLID || t > 4 && t < 10 || t == PLATE ? 1 : 0;
+}
+function owTop(cx, cy) {          // one-way platform surface, -1 none
+  if (cx < 0 || cx >= GW || cy < 0 || cy >= GH) return -1;
+  var i = idx(cx, cy);
+  if (TT[i] == CLOUD) return cy * TS + 4;
+  if (bfloor[i]) return cy * TS + 8;
+  return -1;
+}
+function boxSolid(x, y, w, h) {
+  var x0 = flr((x - w) / TS), x1 = flr((x + w - .01) / TS),
+      y0 = flr((y - h) / TS), y1 = flr((y - .01) / TS), cx, cy;
+  for (cy = y0; cy <= y1; cy++) for (cx = x0; cx <= x1; cx++) if (solidCell(cx, cy)) return 1;
+  return 0;
+}
+
+// ---------- actor ----------
+var AW = 5, AH = 12;
+function mkActor(i) {
+  return { i: i, x: spX, y: spY, vx: 0, vy: 0, g: 0, pg: 0, f: 1, ct: 0, jb: 0, pj: 0,
+           dead: 0, hold: 0, sq: 1, an: 0, pt: [] };
+}
+function mvX(a, dx) {
+  a.x += dx;
+  if (boxSolid(a.x, a.y, AW, AH)) {
+    if (a.pg) for (var s = 1; s < 10; s++)      // step assist over small lips
+      if (!boxSolid(a.x, a.y - s, AW, AH)) { a.y -= s; a.g = 1; return }
+    a.x = dx > 0 ? flr((a.x + AW) / TS) * TS - AW - .01 : (flr((a.x - AW) / TS) + 1) * TS + AW + .01;
+    a.vx = 0; return;
+  }
+}
+function mvY(a, dy) {
+  var py = a.y; a.y += dy;
+  if (boxSolid(a.x, a.y, AW, AH)) {
+    if (dy > 0) { a.y = flr(a.y / TS) * TS - .01; a.g = 1 }
+    else a.y = (flr((a.y - AH) / TS) + 1) * TS + AH + .01;
+    a.vy = 0; return;
+  }
+  if (dy > 0) {
+    var best = -1, x0 = flr((a.x - AW) / TS), x1 = flr((a.x + AW - .01) / TS), cx, cy, t, j, o;
+    for (cy = flr(py / TS); cy <= flr(a.y / TS); cy++)
+      for (cx = x0; cx <= x1; cx++) {
+        t = owTop(cx, cy);
+        if (t >= 0 && py <= t + 1.5 && a.y >= t && (best < 0 || t < best)) best = t;
+      }
+    for (j = 0; j < a.i; j++) {              // stand on earlier unicorns
+      o = actors[j];
+      if (!o.dead && abs(o.x - a.x) < 9) {
+        t = o.y - AH - 1;
+        if (py <= t + 1.5 && a.y >= t && (best < 0 || t < best)) best = t;
+      }
+    }
+    if (best >= 0) { a.y = best; a.vy = 0; a.g = 1 }
+  }
+}
+function stepActor(a, k, isP) {
+  if (a.dead) return;
+  var dir = ((k >> 1) & 1) - (k & 1), acc = a.pg ? .55 : .3;
+  if (dir) { a.vx += dir * acc; a.f = dir } else a.vx *= a.pg ? .7 : .92;
+  a.vx = clamp(a.vx, -2.15, 2.15);
+  if (k & 4) { if (!a.pj) a.jb = 7 } else if (a.jb) a.jb--;
+  a.pj = k & 4;
+  if (a.jb && a.ct) { a.vy = -6.45; a.jb = 0; a.ct = 0; a.sq = 1.4; if (isP) sfx(0) }
+  if (!(k & 4) && a.vy < -1.7) a.vy = -1.7;
+  a.vy += .42; if (a.vy > 7.4) a.vy = 7.4;
+  a.pg = a.g; a.g = 0;
+  mvX(a, a.vx); mvY(a, a.vy);
+  if (a.g) {
+    if (!a.pg && a.vy > 3) {
+      a.sq = .62; if (isP) sfx(1);
+      for (var zi = 0; zi < 5; zi++)                       // landing puff
+        pp(a.x + rnd(zi * 9 + a.x) * 9 - 4.5, a.y, rnd(zi * 3) * 1.8 - .9, -rnd(zi * 7) * 1.3, 12 + zi * 3, 0, 1.1);
+    }
+    a.ct = 7;
+  } else if (a.ct) a.ct--;
+  a.sq += (1 - a.sq) * .22;
+  a.an += a.g ? abs(a.vx) * .18 : .06;
+  if (!(frame % 7)) a.pt.push(a.x, a.y - 8);
+  // hazards
+  var cx = flr(a.x / TS), cy = flr((a.y - 6) / TS);
+  if (cx >= 0 && cx < GW && cy >= 0 && cy < GH) {
+    var t = TT[idx(cx, cy)];
+    if (t == THORN) { a.dead = 2; burst(a.x, a.y - 6, 1, 14) }
+    if (t == GOAL) won = 1;
+  }
+  if (a.y > H + 40) a.dead = 2;
+  // star pickup
+  if (star && !star.h && !star.in && !star.cd && !a.hold &&
+      abs(star.x - a.x) < 11 && abs(star.y - a.y + 6) < 13) { star.h = a; a.hold = 1; sfx(4) }
+  if ((k & 8) && !a.pa && a.hold) { star.h = 0; a.hold = 0; star.cd = 14; star.vx = a.vx * 1.4; star.vy = -2.2 }
+  a.pa = k & 8;
+}
+
+// ---------- beams ----------
+// A unicorn's torso casts a shadow. The band (y-11 .. y-3) excludes the feet,
+// so standing on a horizontal rainbow never severs the rainbow you stand on.
+function eclipsed(cx, cy, d) {
+  var bx = cx * TS + 8, by = cy * TS + 8, ty = cy * TS, i, a;
+  for (i = 0; i < actors.length; i++) {
+    a = actors[i];
+    if (a.dead) continue;
+    if (d & 1) { if (abs(a.x - bx) < 5.5 && a.y - 3 > ty && a.y - 11 < ty + TS) return 1 }
+    else if (a.y - 11 < by && a.y - 3 > by && a.x + 4.5 > cx * TS && a.x - 4.5 < cx * TS + TS) return 1;
+  }
+  return 0;
+}
+function traceBeams() {
+  segs.length = 0; bfloor.fill(0); racc.fill(0);
+  var q = [], seen = {}, n = 0, i, t, p;
+  for (i = 0; i < GW * GH; i++) if (TT[i] == EMIT) q.push([i % GW, (i / GW) | 0, TP[i], 7]);
+  while (q.length && n < 500) {
+    var B = q.pop(), cx = B[0], cy = B[1], d = B[2], mk = B[3];
+    var ax = cx * TS + 8, ay = cy * TS + 8, key, ix, brk = 0, nd;
+    for (; !brk;) {
+      if (++n > 500) break;
+      key = (idx(cx, cy) * 4 + d) * 8 + mk;
+      if (seen[key]) { brk = 4; break } seen[key] = 1;
+      cx += DX[d]; cy += DY[d];
+      if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) { brk = 2; break }
+      ix = idx(cx, cy); t = TT[ix]; p = TP[ix];
+      if (t == SOLID || t == EMIT || t == PLATE) { brk = 2; break }
+      if (t == DOOR && (power & p) != p) { brk = 2; break }
+      if (t == RECV) { racc[ix] |= mk; brk = 1; break }
+      if (eclipsed(cx, cy, d)) { brk = 2; break }
+      if (t == FILT) {
+        segs.push(ax, ay, cx * TS + 8, cy * TS + 8, mk);
+        mk &= p; ax = cx * TS + 8; ay = cy * TS + 8;
+        if (!mk) { brk = 3; break }
+      } else if (t == MIRR) {
+        var g = p >> 1, o = p & 1;
+        if (g && plates[g - 1]) o ^= 1;
+        nd = o ? d ^ 1 : d ^ 3;
+        segs.push(ax, ay, cx * TS + 8, cy * TS + 8, mk);
+        ax = cx * TS + 8; ay = cy * TS + 8; d = nd;
+      } else if (t == PRIS) {
+        segs.push(ax, ay, cx * TS + 8, cy * TS + 8, mk);
+        if (mk & 1) q.push([cx, cy, (d + 3) & 3, 1]);
+        if (mk & 2) q.push([cx, cy, d, 2]);
+        if (mk & 4) q.push([cx, cy, (d + 1) & 3, 4]);
+        brk = 3; break;
+      } else if (!(d & 1)) bfloor[ix] = 1;        // horizontal beam -> walkable
+    }
+    if (brk == 2) segs.push(ax, ay, cx * TS + 8 - DX[d] * 8, cy * TS + 8 - DY[d] * 8, mk);
+    else if (brk != 3) segs.push(ax, ay, cx * TS + 8, cy * TS + 8, mk);
+  }
+  var np = 0;
+  for (i = 0; i < GW * GH; i++) if (TT[i] == RECV && (racc[i] & TP[i]) == TP[i]) np |= TP[i];
+  if (star && star.in) np |= 8;
+  if (np != power) { sfx(np > power ? 2 : 10); pulse = 1 }
+  power = np;
+}
+
+// ---------- world reset ----------
+var won = 0, loopFlash = 0;
+function resetWorld() {
+  frame = 0; won = 0; power = 0; loopFlash = 1;
+  actors = [];
+  for (var i = 0; i <= ghosts.length; i++) actors.push(mkActor(i));
+  pl = actors[ghosts.length];
+  star = hasStar ? { x: stX, y: stY, vx: 0, vy: 0, h: 0, in: 0, cd: 0 } : 0;
+  for (var ri = 0; ri < actors.length; ri++)          // the herd re-forms in a shower
+    burst(spX, spY - 9, ri < ghosts.length ? 7 : 8, 3);
+  rec = new Uint8Array(LOOPF);
+  bfloor.fill(0); racc.fill(0); segs.length = 0;
+  musStart();                       // the song restarts with the loop: music IS the clock
+}
+function commitLoop() {
+  if (frame < 5) { sfx(6); resetWorld(); return }
+  if (ghosts.length + 1 > allow() && spareLeft() < 1) { denied = 2.6; sfx(6); return }
+  ghosts.push({ i: rec.slice(0, frame), n: frame, pt: pl.pt }); sfx(5);
+  resetWorld();
+}
+function undoLoop() { if (ghosts.length) { ghosts.pop(); sfx(6) } resetWorld() }
+
+// ---------- one sim tick ----------
+function step() {
+  var i, a, g;
+  for (i = 0; i < ghosts.length; i++) {
+    a = actors[i]; g = ghosts[i];
+    if (frame >= g.n) { if (!a.dead) { a.dead = 1; burst(a.x, a.y - 7, 7, 10) } continue }
+    stepActor(a, g.i[frame], 0);
+  }
+  rec[frame] = K & 15;
+  stepActor(pl, K & 15, 1);
+
+  // star physics
+  if (star) {
+    if (star.h) {
+      star.x = star.h.x; star.y = star.h.y - 20; star.vx = star.vy = 0;
+      if (seat()) { star.h.hold = 0; star.h = 0 }
+    } else if (!star.in) {
+      if (star.cd) star.cd--;
+      star.vy += .4; if (star.vy > 7) star.vy = 7;
+      star.x += star.vx;
+      if (boxSolid(star.x, star.y + 4, 4, 8)) { star.x = star.vx > 0 ? flr((star.x + 4) / TS) * TS - 4.01 : (flr((star.x - 4) / TS) + 1) * TS + 4.01; star.vx *= -.4 }
+      var py = star.y; star.y += star.vy;
+      if (boxSolid(star.x, star.y + 4, 4, 8)) {
+        star.y = star.vy > 0 ? flr((star.y + 4) / TS) * TS - 4.01 : (flr((star.y - 4) / TS) + 1) * TS + 4.01;
+        star.vy = 0; star.vx *= .6;
+      }
+      else {
+        var cx0 = flr((star.x - 4) / TS), cx1 = flr((star.x + 4) / TS), cx, cy, t2;
+        for (cy = flr((py + 4) / TS); cy <= flr((star.y + 4) / TS); cy++)
+          for (cx = cx0; cx <= cx1; cx++) {
+            t2 = owTop(cx, cy);
+            if (t2 >= 0 && py + 4 <= t2 + 1.5 && star.y + 4 >= t2) { star.y = t2 - 4; star.vy = 0; star.vx *= .8 }
+          }
+      }
+      seat();
+      if (star.y > H + 30) { star.x = stX; star.y = stY; star.vx = star.vy = 0 }
+    }
+  }
+  // plates
+  plates[0] = plates[1] = plates[2] = 0;
+  plateBy[0] = plateBy[1] = plateBy[2] = -1;
+  for (i = 0; i < actors.length; i++) {
+    a = actors[i]; if (a.dead) continue;
+    press(a.x, a.y + 2, AW, i);
+  }
+  if (star && !star.h && !star.in) press(star.x, star.y + 7, 4, -2);
+  var pw = plates[0] | plates[1] << 1 | plates[2] << 2;
+  if (pw != pwOld) { sfx(8); pwOld = pw }          // a plate just clicked down or up
+  traceBeams();
+  frame++;
+}
+function seat() {                      // snap the star into a socket it overlaps
+  var sc = idx(clamp(flr(star.x / TS), 0, GW - 1), clamp(flr(star.y / TS), 0, GH - 1));
+  if (TT[sc] != SOCK) return 0;
+  star.in = 1; star.x = (sc % GW) * TS + 8; star.y = ((sc / GW) | 0) * TS + 8;
+  star.vx = star.vy = 0; sfx(3); burst(star.x, star.y, 8, 22); return 1;
+}
+function press(x, y, w, who) {
+  var cy = flr(y / TS), cx, i;
+  for (cx = flr((x - w) / TS); cx <= flr((x + w - .01) / TS); cx++) {
+    if (cx < 0 || cx >= GW || cy < 0 || cy >= GH) continue;
+    i = idx(cx, cy);
+    if (TT[i] == PLATE) { plates[TP[i]] = 1; if (plateBy[TP[i]] < 0) plateBy[TP[i]] = who }
+  }
+}
+
+// ================= RENDER =================
+var T = 0, shake = 0, P = [], RB = ['#f45', '#f83', '#fd4', '#5d6', '#49f', '#a5f'], HG = 0;
+var F1 = '"Comic Sans MS","Chalkboard SE",system-ui,sans-serif';
+var F2 = 'ui-monospace,"Courier New",monospace';
+function FT(sz, b) { return (b ? 'bold ' : '') + sz + 'px ' + (cr > .55 ? F2 : F1) }
+
+// ---------- particles: x y vx vy life max mask size ----------
+function pp(x, y, vx, vy, lf, mk, sz) { if (P.length < 1600) P.push(x, y, vx, vy, lf, lf, mk, sz) }
+function burst(x, y, mk, n) {
+  for (var i = 0; i < n; i++) {
+    var a = rnd(T * 91 + i * 7.3) * TAU, s = .4 + rnd(i * 3.1 + T) * 2.4;
+    pp(x, y, cos(a) * s, sin(a) * s - .6, 18 + rnd(i) * 22 | 0, mk, 1 + rnd(i * 5) * 1.8);
+  }
+}
+function stepP() {
+  for (var i = 0; i < P.length; i += 8) {
+    P[i] += P[i + 2]; P[i + 1] += P[i + 3]; P[i + 3] += .045; P[i + 2] *= .985; P[i + 4]--;
+    if (P[i + 4] <= 0) { P.splice(i, 8); i -= 8 }
+  }
+}
+function drawP(g) {
+  g.globalCompositeOperation = 'lighter';
+  for (var i = 0; i < P.length; i += 8) {
+    var l = P[i + 4] / P[i + 5], s = P[i + 7] * l;
+    g.globalAlpha = l * .9; g.fillStyle = COL[P[i + 6]] || '#fff';
+    g.beginPath(); g.arc(P[i], P[i + 1], s, 0, TAU); g.fill();
+  }
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+}
+
+// ---------- colour-blind redundancy pips ----------
+function pips(g, x, y, mk, s) {
+  var n = 0, i, b, px;
+  for (i = 0; i < 4; i++) if (mk >> i & 1) n++;
+  for (i = 0, b = 0; i < 4; i++) {
+    if (!(mk >> i & 1)) continue;
+    px = x + (b - (n - 1) / 2) * (s * 2.3); b++;
+    g.fillStyle = COL[1 << i]; g.beginPath();
+    if (i == 0) { g.moveTo(px, y - s); g.lineTo(px + s, y + s); g.lineTo(px - s, y + s) }
+    else if (i == 1) g.rect(px - s * .85, y - s * .85, s * 1.7, s * 1.7);
+    else g.arc(px, y, s, 0, TAU);
+    g.fill();
+  }
+}
+
+// ---------- the unicorn ----------
+function uni(g, a, alp, tint, num, ring) {
+  var fx = a.f, sy = a.sq, i, ph = a.an, mv = abs(a.vx) > .3 && a.g;
+  if (!mv && a.g && !a.hold) sy *= 1 + sin(T * 2.8) * .04;   // idle breathing
+  var sx = 2 - sy;
+  g.save();
+  g.translate(a.x, a.y); g.scale(sx * fx, sy); g.globalAlpha = alp;
+  // legs
+  g.strokeStyle = tint || '#fff'; g.lineWidth = 2.4; g.lineCap = 'round';
+  g.beginPath();
+  for (i = 0; i < 4; i++) {
+    var o = [-3.6, -2.2, 2.2, 3.6][i], p = ph + [0, 2.4, 3.6, 1.1][i], ex = o, ey = 0;
+    if (!a.g) { ex = o + (i < 2 ? -2.4 : 2.6); ey = -1.8 - (i < 2 ? 1.4 : 0) }
+    else if (mv) { ex = o + sin(p) * 3.4; ey = -max(0, sin(p + 1)) * 3.4 }
+    g.moveTo(o * .9, -5.4); g.lineTo(ex, ey);
+  }
+  g.stroke();
+  // tail
+  g.lineWidth = 2.1;
+  for (i = 0; i < 6; i++) {
+    var t0 = i / 6, t1 = (i + 1) / 6;
+    g.strokeStyle = tint || RB[i];
+    g.beginPath();
+    g.moveTo(-6 - t0 * 8, -9 + sin(T * 5 - i * .7) * 2.6 * t0 + t0 * t0 * 5);
+    g.lineTo(-6 - t1 * 8, -9 + sin(T * 5 - (i + 1) * .7) * 2.6 * t1 + t1 * t1 * 5);
+    g.stroke();
+  }
+  // body
+  g.fillStyle = tint || '#fff';
+  g.beginPath(); g.ellipse(0, -8, 7.2, 5.2, 0, 0, TAU); g.fill();
+  // mane - drawn BEFORE the neck so it falls behind the head, not across the face
+  g.lineWidth = 2.35; g.lineCap = 'round';
+  for (i = 0; i < 6; i++) {
+    var q0 = i / 6, q1 = (i + 1) / 6;
+    g.strokeStyle = tint || RB[5 - i];
+    g.beginPath();
+    g.moveTo(4.4 - q0 * 3.3, -20.8 + q0 * 11.6 + sin(T * 6 - i * .9) * 1.3 * q0);
+    g.lineTo(4.4 - q1 * 3.3, -20.8 + q1 * 11.6 + sin(T * 6 - (i + 1) * .9) * 1.3 * q1);
+    g.stroke();
+  }
+  // neck + head
+  g.beginPath(); g.moveTo(2, -8); g.lineTo(4.4, -17.6); g.lineTo(8.2, -17.2); g.lineTo(6, -7); g.fill();
+  g.beginPath(); g.ellipse(7, -17.4, 4.3, 3.7, .25, 0, TAU); g.fill();
+  g.beginPath(); g.ellipse(10.4, -16.2, 2.5, 1.9, .35, 0, TAU); g.fill();
+  // ears
+  g.beginPath(); g.moveTo(4.4, -20); g.lineTo(5.2, -23.8); g.lineTo(7.2, -20.3); g.fill();
+  if (!tint) { g.fillStyle = 'rgba(255,170,195,.75)'; g.beginPath(); g.moveTo(5.1, -20.4); g.lineTo(5.4, -22.6); g.lineTo(6.3, -20.5); g.fill(); g.fillStyle = '#fff' }
+  // horn: a proper tapered spiral, not a triangle
+  var bx0 = 7.7, by0 = -20.3, tx0 = 12.8, ty0 = -29.4, q, tq, qx, qy, qw;
+  if (!HG) { HG = g.createLinearGradient(bx0, by0, tx0, ty0);
+    HG.addColorStop(0, '#fff6d2'); HG.addColorStop(.5, '#ffcf5e'); HG.addColorStop(1, '#fffbe8') }
+  g.fillStyle = tint || HG;
+  g.beginPath(); g.moveTo(bx0 - 1.5, by0 - .5); g.lineTo(bx0 + 1.2, by0 + .9); g.lineTo(tx0, ty0); g.closePath(); g.fill();
+  if (!tint) {
+    g.strokeStyle = 'rgba(158,104,12,.5)'; g.lineWidth = .5;
+    g.beginPath();
+    for (q = 1; q < 4; q++) {
+      tq = q / 4.3; qx = bx0 + (tx0 - bx0) * tq; qy = by0 + (ty0 - by0) * tq; qw = 1.4 * (1 - tq);
+      g.moveTo(qx - qw * 1.1, qy + qw * .55); g.lineTo(qx + qw * 1.2, qy - qw * .25);
+    }
+    g.stroke();
+    g.fillStyle = '#fff'; g.globalAlpha = alp * (.55 + sin(T * 5) * .35);
+    g.beginPath(); g.arc(tx0 - .3, ty0 + .5, .62, 0, TAU); g.fill(); g.globalAlpha = alp;
+  }
+  // eye
+  if (!tint) {
+    g.fillStyle = '#213';
+    if (cr > .8 && (T * 3 | 0) % 7 < 2) { g.fillRect(6.6, -19.6, 3.4, 4.4) }
+    else { g.beginPath(); g.arc(8.2, -17.9, 1.15, 0, TAU); g.fill(); }
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(8.55, -18.3, .42, 0, TAU); g.fill();
+    // cheek
+    g.fillStyle = 'rgba(255,120,170,' + (.5 - cr * .45) + ')';
+    g.beginPath(); g.arc(5.6, -15.8, 1.5, 0, TAU); g.fill();
+  } else { g.fillStyle = '#0000'; }
+  g.restore();
+  if (num) {
+    g.globalAlpha = .95; g.font = FT(6.5, 1); g.textAlign = 'center';
+    g.fillStyle = 'rgba(20,8,30,.55)';
+    g.beginPath(); g.ellipse(a.x, a.y - 31.5, 5.2, 4.4, 0, 0, TAU); g.fill();
+    g.fillStyle = ring || '#fff'; g.fillText(num, a.x, a.y - 29.4);
+    g.textAlign = 'left';
+  }
+  g.globalAlpha = 1;
+}
+
+// ---------- tiles ----------
+function chasm(g) {                       // depth under the world so pits read as pits
+  g.fillStyle = chG; g.fillRect(0, gndY - 6, W, H - gndY + 6);
+}
+function tiles(g) {
+  var cx, cy, i, t, p, x, y, w = cr > .6;
+  for (cy = 0; cy < GH; cy++) for (cx = 0; cx < GW; cx++) {
+    i = idx(cx, cy); t = TT[i]; if (!t) continue;
+    p = TP[i]; x = cx * TS; y = cy * TS;
+    if (t == SOLID) {
+      var up = cy > 0 && (TT[i - GW] == 0 || TT[i - GW] == CLOUD || TT[i - GW] == GOAL);
+      var dn = cy < GH - 1 && TT[i + GW] != SOLID && TT[i + GW] != PLATE;
+      g.fillStyle = w ? '#3b3048' : '#b4794e';
+      if (dn) {                                   // tapered underside: a floating island
+        g.beginPath(); g.moveTo(x, y); g.lineTo(x + TS, y);
+        g.lineTo(x + TS - 2.5, y + TS - 1); g.lineTo(x + 2.5, y + TS - 1); g.closePath(); g.fill();
+      } else g.fillRect(x, y, TS, TS);
+      g.fillStyle = w ? '#2e2539' : '#96603c';
+      if (dn) { g.beginPath(); g.moveTo(x + 1, y + TS - 5); g.lineTo(x + TS - 1, y + TS - 5); g.lineTo(x + TS - 2.5, y + TS - 1); g.lineTo(x + 2.5, y + TS - 1); g.closePath(); g.fill() }
+      else g.fillRect(x, y + TS - 4, TS, 4);
+      if (up) {
+        g.fillStyle = w ? '#44614f' : '#6fc97c';
+        g.beginPath(); g.moveTo(x, y + 6);
+        for (var k = 0; k <= 4; k++) g.lineTo(x + k * 4, y + (k & 1 ? 1 : 3.6));
+        g.lineTo(x + TS, y + 6); g.fill();
+        g.fillStyle = w ? '#688a75' : '#a9ef92';
+        g.fillRect(x, y + 4.4, TS, 1.6);
+      }
+    } else if (t == CLOUD) {
+      g.fillStyle = w ? 'rgba(190,180,205,.85)' : 'rgba(255,255,255,.93)';
+      g.beginPath();
+      g.ellipse(x + 4, y + 6, 5, 4.2, 0, 0, TAU); g.ellipse(x + 12, y + 6, 5, 4.2, 0, 0, TAU);
+      g.ellipse(x + 8, y + 4.5, 6, 4.6, 0, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(150,170,220,.35)';
+      g.beginPath(); g.ellipse(x + 8, y + 8.5, 7.4, 2.2, 0, 0, TAU); g.fill();
+    } else if (t == THORN) {
+      g.fillStyle = cr > .5 ? '#2a1030' : '#7a2050';
+      g.beginPath();
+      for (var s = 0; s < 3; s++) { g.moveTo(x + 1 + s * 5, y + TS); g.lineTo(x + 3.5 + s * 5, y + 3); g.lineTo(x + 6 + s * 5, y + TS) }
+      g.fill();
+      g.fillStyle = '#f4a'; g.globalAlpha = .5;
+      g.beginPath(); for (s = 0; s < 3; s++) g.arc(x + 3.5 + s * 5, y + 3.5, 1.2, 0, TAU);
+      g.fill(); g.globalAlpha = 1;
+    } else if (t == GOAL) {
+      var pu = sin(T * 3) * .5 + .5;
+      g.fillStyle = cr > .6 ? '#2b1f38' : '#7d59a0';         // towers
+      g.fillRect(x - 5, y - 9, 5, TS + 9); g.fillRect(x + 16, y - 9, 5, TS + 9);
+      g.fillStyle = cr > .6 ? '#3a2b4a' : '#9670b8';
+      for (var bt = 0; bt < 3; bt++) { g.fillRect(x - 5 + bt * 2, y - 12, 1.4, 3); g.fillRect(x + 16 + bt * 2, y - 12, 1.4, 3) }
+      g.fillStyle = cr > .6 ? '#241a2e' : '#6b4a86';
+      g.beginPath(); g.moveTo(x, y + TS); g.lineTo(x, y + 5);
+      g.arc(x + 8, y + 5, 8, PI, 0); g.lineTo(x + 16, y + TS); g.fill();
+      var dg = g.createLinearGradient(x, y + TS, x, y - 4);
+      dg.addColorStop(0, 'rgba(255,246,200,' + (.55 + pu * .4) + ')');
+      dg.addColorStop(1, 'rgba(255,210,120,' + (.15 + pu * .2) + ')');
+      g.fillStyle = dg;
+      g.beginPath(); g.moveTo(x + 3, y + TS); g.lineTo(x + 3, y + 6);
+      g.arc(x + 8, y + 6, 5, PI, 0); g.lineTo(x + 13, y + TS); g.fill();
+      BX.globalCompositeOperation = 'lighter'; BX.globalAlpha = .5 + pu * .3;
+      BX.fillStyle = '#ffe9a0'; BX.beginPath(); BX.arc(x + 8, y + 7, 13, 0, TAU); BX.fill();
+      BX.globalAlpha = 1; BX.globalCompositeOperation = 'source-over';
+    } else if (t == EMIT) {
+      g.fillStyle = '#8a92b8'; g.beginPath();
+      g.roundRect(x + 1, y + 1, 14, 14, 3); g.fill();
+      g.fillStyle = '#f0f4ff';
+      g.beginPath(); g.arc(x + 8 + DX[p] * 3, y + 8 + DY[p] * 3, 3.4 + sin(T * 8) * .35, 0, TAU); g.fill();
+      g.fillStyle = '#4b5478';
+      g.beginPath(); g.arc(x + 8 - DX[p] * 4, y + 8 - DY[p] * 4, 3, 0, TAU); g.fill();
+    } else if (t == MIRR) {
+      var gp = p >> 1, o = p & 1;
+      if (gp && plates[gp - 1]) o ^= 1;
+      g.save(); g.translate(x + 8, y + 8); g.rotate(o ? PI / 4 : -PI / 4);
+      g.fillStyle = gp ? COL[[1, 2, 4][gp - 1]] : '#7d86a8';
+      g.beginPath(); g.roundRect(-9, -3.2, 18, 6.4, 3); g.fill();
+      g.fillStyle = '#fff'; g.globalAlpha = .82;
+      g.beginPath(); g.roundRect(-8, -2.4, 16, 2.6, 1.3); g.fill(); g.globalAlpha = 1;
+      g.restore();
+      if (gp) { g.fillStyle = '#0006'; g.beginPath(); g.arc(x + 8, y + 8, 2.2, 0, TAU); g.fill(); pips(g, x + 8, y + 8, [1, 2, 4][gp - 1], 1.5) }
+    } else if (t == PRIS) {
+      g.fillStyle = 'rgba(235,245,255,.6)';
+      g.beginPath(); g.moveTo(x + 8, y + 1); g.lineTo(x + 15, y + 14); g.lineTo(x + 1, y + 14); g.closePath(); g.fill();
+      g.strokeStyle = '#fff'; g.lineWidth = 1; g.stroke();
+      for (var q = 0; q < 3; q++) { g.fillStyle = COL[1 << q]; g.globalAlpha = .55; g.fillRect(x + 4 + q * 3, y + 9, 2.4, 4) }
+      g.globalAlpha = 1;
+    } else if (t == FILT) {
+      g.fillStyle = COL[p]; g.globalAlpha = .38; g.fillRect(x + 1, y + 1, 14, 14); g.globalAlpha = 1;
+      g.strokeStyle = COL[p]; g.lineWidth = 1.6; g.strokeRect(x + 1.4, y + 1.4, 13.2, 13.2);
+      pips(g, x + 8, y + 8, p, 1.7);
+    } else if (t == RECV) {
+      var on = (racc[i] & p) == p;
+      g.fillStyle = '#39406a'; g.beginPath(); g.roundRect(x + .5, y + .5, 15, 15, 4); g.fill();
+      g.fillStyle = on ? COL[p] : COLD[p];
+      g.beginPath(); g.arc(x + 8, y + 8, on ? 5.6 + sin(T * 9) * .5 : 4.4, 0, TAU); g.fill();
+      if (on) { g.globalAlpha = .35; g.beginPath(); g.arc(x + 8, y + 8, 8.5, 0, TAU); g.fill(); g.globalAlpha = 1 }
+      pips(g, x + 8, y + 13, p, 1.5);
+    } else if (t == DOOR) {
+      var op = (power & p) == p,
+          mid = cy == 0 || TT[i - GW] != DOOR || TP[i - GW] != p,
+          bot = cy == GH - 1 || TT[i + GW] != DOOR || TP[i + GW] != p;
+      g.fillStyle = 'rgba(30,14,48,.75)';                 // jamb, always visible
+      g.fillRect(x + .5, y, 2, TS); g.fillRect(x + 13.5, y, 2, TS);
+      if (op) {
+        g.globalAlpha = .09; g.fillStyle = COL[p];
+        g.fillRect(x + 2.5, y, 11, TS); g.globalAlpha = 1;
+        g.fillStyle = COL[p];
+        if (mid) g.fillRect(x + 2.5, y, 11, 1.8);
+        if (bot) g.fillRect(x + 2.5, y + TS - 1.8, 11, 1.8);
+      } else {
+        g.fillStyle = COL[p]; g.fillRect(x + 2.5, y, 11, TS);
+        g.fillStyle = 'rgba(255,255,255,.35)';
+        for (var b2 = 0; b2 < 3; b2++) g.fillRect(x + 2.5, y + 2 + b2 * 5, 11, 1.3);
+        g.fillStyle = COLD[p]; g.fillRect(x + 2.5, y + TS - 2, 11, 2);
+      }
+      if (mid) { g.fillStyle = 'rgba(20,8,34,.5)'; g.beginPath(); g.roundRect(x + 2, y + 3, 12, 8, 3); g.fill(); pips(g, x + 8, y + 7, p, 1.5) }
+    } else if (t == PLATE) {
+      var pd = plates[p], pc = COL[[1, 2, 4][p]];
+      g.fillStyle = cr > .6 ? '#3b3348' : '#8b6a4e'; g.fillRect(x, y + 4, TS, 12);
+      g.fillStyle = pc; g.globalAlpha = pd ? 1 : .75;
+      g.beginPath(); g.roundRect(x + 1.5, y + (pd ? 3.4 : 1), 13, pd ? 3.4 : 5, 1.8); g.fill();
+      g.globalAlpha = 1;
+      if (pd) {
+        var who = plateBy[p], hc = who >= 0 ? (who < ghosts.length ? GC(who) : '#fff6d0') : who == -2 ? '#fc3' : pc;
+        g.globalAlpha = .3; g.fillStyle = hc;
+        g.beginPath(); g.arc(x + 8, y + 4, 9 + sin(T * 8) * .8, 0, TAU); g.fill();
+        g.globalAlpha = .9; g.lineWidth = 1; g.strokeStyle = hc;
+        g.beginPath(); g.roundRect(x + 1, y + 2.6, 14, 5, 2); g.stroke();
+        g.globalAlpha = 1;
+      }
+      pips(g, x + 8, y + 11, [1, 2, 4][p], 1.4);
+    } else if (t == SOCK) {
+      g.fillStyle = '#39406a'; g.beginPath(); g.roundRect(x + .5, y + .5, 15, 15, 4); g.fill();
+      g.strokeStyle = star && star.in ? '#fc3' : '#6a72a0'; g.lineWidth = 1.5;
+      g.beginPath();
+      for (var z = 0; z < 10; z++) { var rr = z & 1 ? 2.4 : 5.6, an2 = z * PI / 5 - PI / 2; g[z ? 'lineTo' : 'moveTo'](x + 8 + cos(an2) * rr, y + 8 + sin(an2) * rr) }
+      g.closePath(); g.stroke();
+    }
+  }
+}
+// ---------- beams ----------
+// a beam carries a colour mask; we draw it as one stripe per component, so a
+// full-spectrum (mask 7) beam is literally a rainbow ribbon you can stand on.
+function bcols(mk) {
+  if (mk == 7) return RB;
+  var o = [], k;
+  for (k = 0; k < 4; k++) if (mk >> k & 1) o.push(COL[1 << k]);
+  return o.length ? o : ['#fff'];
+}
+function beams(g, wide) {
+  g.lineCap = 'round';
+  var i, mk, x1, y1, x2, y2, cs, n, sp, k, px, py, ox, oy, L, nx, ny, d2;
+  for (i = 0; i < segs.length; i += 5) {
+    x1 = segs[i]; y1 = segs[i + 1]; x2 = segs[i + 2]; y2 = segs[i + 3]; mk = segs[i + 4];
+    L = hyp(x2 - x1, y2 - y1) || 1; nx = (x2 - x1) / L; ny = (y2 - y1) / L;
+    px = -ny; py = nx;
+    cs = bcols(mk); n = cs.length; sp = 6.4 / n;
+    if (wide) {                                   // bloom pass: colour-preserving glow
+      g.globalCompositeOperation = 'lighter';
+      g.globalAlpha = .1; g.lineWidth = 7;
+      for (k = 0; k < n; k++) {
+        g.strokeStyle = cs[k]; ox = px * (k - (n - 1) / 2) * sp; oy = py * (k - (n - 1) / 2) * sp;
+        g.beginPath(); g.moveTo(x1 + ox, y1 + oy); g.lineTo(x2 + ox, y2 + oy); g.stroke();
+      }
+      continue;
+    }
+    // soft halo
+    g.globalCompositeOperation = 'lighter';
+    g.globalAlpha = .13; g.lineWidth = 10; g.strokeStyle = COL[mk] || '#fff';
+    g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+    // the ribbon itself - drawn NORMALLY so the colours stay colours
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1; g.lineWidth = sp * 1.2;
+    for (k = 0; k < n; k++) {
+      g.strokeStyle = cs[k]; ox = px * (k - (n - 1) / 2) * sp; oy = py * (k - (n - 1) / 2) * sp;
+      g.beginPath(); g.moveTo(x1 + ox, y1 + oy); g.lineTo(x2 + ox, y2 + oy); g.stroke();
+    }
+    if (y1 == y2) {                               // stand-here affordance
+      g.globalAlpha = .75; g.lineWidth = 1.1; g.strokeStyle = '#fff';
+      g.setLineDash([2.5, 5]); g.lineDashOffset = -T * 20;
+      g.beginPath(); g.moveTo(x1, y1 - 4.4); g.lineTo(x2, y2 - 4.4); g.stroke();
+      g.setLineDash([]);
+    }
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = '#fff'; g.globalAlpha = .5;
+    for (d2 = (T * 42) % 22; d2 < L; d2 += 22) {
+      g.beginPath(); g.arc(x1 + nx * d2, y1 + ny * d2, 1.1, 0, TAU); g.fill();
+    }
+    var eg = g.createRadialGradient(x2, y2, 0, x2, y2, 7);   // the light lands here
+    eg.addColorStop(0, '#fff'); eg.addColorStop(.4, COL[mk] || '#fff'); eg.addColorStop(1, '#0000');
+    g.globalAlpha = .7 + sin(T * 11) * .12; g.fillStyle = eg;
+    g.beginPath(); g.arc(x2, y2, 7, 0, TAU); g.fill();
+  }
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+}
+
+// ---------- sky ----------
+var skyG = 0, skyC = -1;
+function sky(g) {
+  var k = flr(cr * 5);
+  if (skyC != k) {
+    skyC = k; skyG = g.createLinearGradient(0, 0, 0, H);
+    var top = ['#8fd8ff', '#8fd0f4', '#9aa9d8', '#6a6690', '#3a2f50', '#180d22'][k];
+    var bot = ['#ffd8ee', '#f8cfe2', '#d9b8d2', '#9a7ea6', '#523a5c', '#25102c'][k];
+    skyG.addColorStop(0, top); skyG.addColorStop(1, bot);
+  }
+  g.fillStyle = skyG; g.fillRect(-400, -400, W + 800, H + 800);
+  // sun / hole - it breathes with the clock
+  var sx = W * .78, sy = H * .17, sr = 70 + bt * 7;
+  g.globalCompositeOperation = 'lighter';
+  var sg = g.createRadialGradient(sx, sy, 2, sx, sy, sr);
+  sg.addColorStop(0, cr > .6 ? 'rgba(255,80,140,.35)' : 'rgba(255,250,200,.42)');
+  sg.addColorStop(1, 'rgba(255,240,180,0)');
+  g.fillStyle = sg; g.beginPath(); g.arc(sx, sy, sr, 0, TAU); g.fill();
+  g.globalCompositeOperation = 'source-over';
+  // a rainbow arc in the sky: the thing the whole world is named after,
+  // slowly coming apart as wonderfulness drains
+  var ar = W * .62, acx = W * .42, acy = H * 1.02, k2;
+  for (k2 = 0; k2 < 6; k2++) {
+    g.strokeStyle = RB[k2]; g.lineWidth = 5.5;
+    g.globalAlpha = (.2 - cr * .16) * (1 - k2 * .05);
+    if (g.globalAlpha <= 0) break;
+    g.beginPath();
+    var gap = cr * 1.1, a0 = PI + .12 + gap * (k2 % 2 ? .5 : .2), a1 = TAU - .12 - gap * (k2 % 2 ? .2 : .5);
+    g.arc(acx, acy, ar - k2 * 5.5, a0, a1);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  // stars, once the sky has gone
+  if (cr > .45) {
+    g.fillStyle = '#fff';
+    for (k2 = 0; k2 < 26; k2++) {
+      g.globalAlpha = (cr - .45) * 1.4 * (.3 + rnd(k2 * 4.1) * .7) * (.5 + sin(T * 2 + k2) * .5);
+      g.fillRect(rnd(k2 * 7.7) * W, rnd(k2 * 3.3) * H * .6, 1.3, 1.3);
+    }
+    g.globalAlpha = 1;
+  }
+  // rolling hills - depth, and stops the pastel sky washing out the floor
+  for (var l = 0; l < 3; l++) {
+    g.fillStyle = cr > .6 ? ['rgba(78,64,98,.38)', 'rgba(64,50,82,.6)', 'rgba(50,38,66,.85)'][l]
+                          : ['rgba(198,226,214,.4)', 'rgba(176,214,190,.55)', 'rgba(146,200,164,.7)'][l];
+    g.beginPath(); g.moveTo(-20, H + 20);
+    for (var hx = -20; hx <= W + 20; hx += 16)
+      g.lineTo(hx, H * .6 + l * 17 + sin(hx * (.009 + l * .004) + l * 2.2) * (16 - l * 3) + sin(hx * .031 + l) * 5);
+    g.lineTo(W + 20, H + 20); g.fill();
+  }
+  // clouds
+  for (var i = 0; i < 9; i++) {
+    var sp = .35 + (i % 3) * .3, cxp = ((rnd(i * 5.7) * W * 1.6 + T * sp * 7) % (W + 160)) - 80;
+    var cyp = 12 + rnd(i * 2.3) * H * .45, sc2 = .6 + rnd(i * 9.1) * .9;
+    g.fillStyle = 'rgba(255,255,255,' + (.18 + (i % 3) * .12) * (1 - cr * .55) + ')';
+    g.beginPath();
+    g.ellipse(cxp, cyp, 17 * sc2, 8 * sc2, 0, 0, TAU);
+    g.ellipse(cxp + 12 * sc2, cyp + 2, 12 * sc2, 6 * sc2, 0, 0, TAU);
+    g.ellipse(cxp - 13 * sc2, cyp + 2.5, 10 * sc2, 5 * sc2, 0, 0, TAU);
+    g.fill();
+  }
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+}
+
+// ---------- on-screen controls (mobile is scored separately) ----------
+var TB = [
+  [.0, .46, .13, .54, '\u25c0', 1, 0], [.13, .46, .14, .54, '\u25b6', 2, 0],
+  [.72, .46, .15, .54, '\u25b2', 4, 0], [.87, .46, .13, .54, '\u2726', 8, 0],
+  [.87, 0, .13, .28, '\u21ba', 0, 1], [.74, 0, .13, .28, '\u21b6', 0, 2],
+  [.0, 0, .13, .28, '\u00bb', 0, 4], [.43, 0, .14, .28, '\u2161', 0, 128],
+];
+function touchUI(g) {
+  if (!touchOn) return;
+  var i, b, x, y, w, h, on;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (i = 0; i < TB.length; i++) {
+    b = TB[i]; x = b[0] * W; y = b[1] * H; w = b[2] * W; h = b[3] * H;
+    on = (b[5] && (K & b[5])) || (b[6] && (meta & b[6]));
+    g.globalAlpha = on ? .45 : .2;
+    g.fillStyle = '#fff';
+    g.beginPath(); g.roundRect(x + 3, y + 3, w - 6, h - 6, 7); g.fill();
+    g.globalAlpha = on ? .95 : .65;
+    g.font = FT(b[6] ? 13 : 17, 1);
+    g.fillText(b[4], x + w / 2, y + h / 2);
+  }
+  g.globalAlpha = 1; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+}
+
+
+// ================= GAME =================
+// st: 0 title/select  1 play  2 curtain call  3 ending
+var st = 0, li = 0, acc = 0, last = 0, intro = 0, cc = 0, ccEnd = 0, ccT = 0;
+var total = 0, best = [], maxL = 0, sel = 0, endT = 0, zoom = 1;
+var spare = 13, SPMAX = 13, refund = 0, denied = 0;
+var bt = 0, pz = 0, msel = 0;
+function GC(i) { return 'hsl(' + ((i * 67 + 24) % 360) + ',92%,66%)' }
+var POST = ("THE END OF THE RAINBOW IS THIS WAY!|SHE WILL WAIT HERE. SHE DOESN'T MIND.|" +
+  "EXCELLENT PROGRESS.|" +
+  "SHE STOOD UNTIL YOU CROSSED.|ONE OF YOU IS ENOUGH, IF SHE HURRIES.|" +
+  "THE LIGHT DOES NOT MIND BEING BLOCKED.|DO NOT LOOK BACK.|" +
+  "TWO COLOURS. ONE OF YOU. AS DESIGNED.|THE STAR WAS NEVER YOURS TO CARRY.|" +
+  "THEY ARE STILL STANDING. ALL OF THEM.|A BODY IS A COMPONENT. YOU KNEW THAT.|" +
+  "THE HERD IS A NUMBER. THE NUMBER IS YOU.|THERE IS NO OTHER SIDE.").split('|');
+
+function load() {
+  try {
+    var d = JSON.parse(localStorage['tlu.p']);
+    maxL = d.m | 0; total = d.t | 0; best = d.b || [];
+    spare = d.s == null ? SPMAX : d.s | 0;
+  } catch (e) {}
+}
+function save() {
+  try { localStorage['tlu.p'] = JSON.stringify({ m: maxL, t: total, b: best, s: spare }) } catch (e) {}
+}
+// Each level issues you par+1 unicorns. Going over draws on a reserve of 13 for the
+// whole game; finishing at par or better returns one to the reserve.
+function allow() { return LEV[li].p + 1 }
+function over() { return max(0, ghosts.length - allow()) }
+function spareLeft() { return spare - over() }
+function startLevel(n) {
+  li = n; sel = n; ghosts = []; parseLevel(LEV[n].m);
+  cr = LEV.length > 1 ? M.pow(n / (LEV.length - 1), 1.85) : 0;   // stay cheerful, then collapse
+  refund = 0; denied = 0; pz = 0;
+  skyC = -1; cc = 0; intro = 2.4; st = 1; P.length = 0;
+  resetWorld();
+}
+function startCurtain() {
+  ghosts.push({ i: rec.slice(0, frame + 1), n: frame + 1, pt: pl.pt });
+  ccEnd = frame + 40; ccT = 0; cc = 1; st = 2; zoom = 1;
+  var u = ghosts.length - 1;                       // the winning run is not a ghost you spent
+  spare -= max(0, u - allow());
+  refund = 0;
+  if (u <= LEV[li].p && spare < SPMAX) { spare++; refund = 1; sfx(3) }
+  total += u + 1; if (best[li] == null || u + 1 < best[li]) best[li] = u + 1;
+  if (li + 1 > maxL) maxL = li + 1;
+  save();
+  resetWorld(); pl.dead = 1;
+}
+function nextLevel() { if (li + 1 < LEV.length) startLevel(li + 1); else { st = 3; endT = 0; musStart() } }
+
+function tick() {
+  if (cc) {
+    if (frame >= ccEnd) return;
+    K = 0; step(); won = 0; return;
+  }
+  if (won) { sfx(7); shake = 7; buzz(240, 1); burst(pl.x, pl.y - 8, 7, 46); startCurtain(); return }
+  if (frame >= LOOPF) { commitLoop(); return }
+  if (pl.dead) { shake = 6; loopFlash = .55; buzz(160, .9); resetWorld(); sfx(6); return }  step();
+  if (frame > LOOPF - 180 && !(frame % 20)) sfx(9);
+}
+
+function loop(now) {
+  requestAnimationFrame(loop);
+  var dt = min(.05, (now - last) / 1000); last = now; T += dt;
+  inputPoll();
+  bt = st && st < 3 ? max(0, 1 - frame % 60 / 14) : max(0, 1 - T % 1 * 4);   // the clock, made visible
+  if (st == 1 && MP & 128) { pz ^= 1; if (A) pz ? A.suspend() : A.resume() }   // freeze the song WITH the sim
+  if (pz) {
+    if (KP & 4 || KP & 1) { msel += 2; msel %= 3 }
+    if (KP & 8 || KP & 2) msel = (msel + 1) % 3;
+    if (MP & 1) {
+      if (msel == 1) { pz = 0; ghosts = []; resetWorld(); if (A) A.resume() }
+      else if (msel == 2) { pz = 0; st = 0; sel = li; if (A) A.resume() }
+      else { pz = 0; if (A) A.resume() }
+    }
+  } else if (st == 1) {
+    if (MP & 1) commitLoop();
+    if (MP & 2) undoLoop();
+    if (MP & 8) { ghosts = []; resetWorld() }
+    if (MP & 64) { resetWorld(); sfx(6) }        // retry this loop, keep the herd
+    acc += dt;
+    var n = 0, mx = meta & 4 ? 5 : 1;
+    while (acc > 1 / 60 && n < 8) { acc -= 1 / 60; for (var q = 0; q < mx && st == 1; q++) tick(); n++ }
+    if (intro > 0) intro -= dt;
+    if (loopFlash > 0) loopFlash -= dt * 3;
+    if (pulse > 0) pulse -= dt * 5;
+    if (denied > 0) denied -= dt;
+  } else if (st == 2) {
+    ccT += dt; zoom += (.86 - zoom) * dt * 3;
+    acc += dt;
+    while (acc > 1 / 60) { acc -= 1 / 60; tick() }
+    if ((ccT > 1.2 && frame >= ccEnd) || MP & 16 && ccT > .4) nextLevel();
+  } else if (st == 0) {
+    if (MP & 1 || KP & 4) { A0(); startLevel(sel) }
+    if (KP & 1) sel = max(0, sel - 1);
+    if (KP & 2) sel = min(min(maxL, LEV.length - 1), sel + 1);
+  } else if (st == 3) {
+    endT += dt;
+    if (endT > 6.4 && MP & 16) { st = 0; sel = 0 }
+  }
+  stepP(); shake *= .86;
+  render(dt);
+  if (touchOn && port) padUI();
+}
+
+function render() {
+  var sk = RM ? 0 : shake, sh = sk * (rnd(T * 313) - .5) * 2, sv = sk * (rnd(T * 71 + 5) - .5) * 2, z = st == 2 ? zoom : 1;
+  X.setTransform(1, 0, 0, 1, 0, 0);
+  if (touchOn && port) {                       // the handheld shell
+    X.fillStyle = '#c9c2b1'; X.fillRect(0, 0, c.width, c.height);
+    X.setTransform(DPR, 0, 0, DPR, 0, 0);
+    X.fillStyle = '#4e493d';
+    X.beginPath(); X.roundRect(OX - 8, OY - 11, W * SC + 16, H * SC + 22, 9); X.fill();
+    X.globalAlpha = .25 + .75 * bt; X.fillStyle = '#ff5a5a';
+    X.beginPath(); X.arc(OX + 8, OY - 5.5, 1.9, 0, TAU); X.fill(); X.globalAlpha = 1;
+  } else { X.fillStyle = '#0d0a18'; X.fillRect(0, 0, c.width, c.height) }
+  var s2 = SC * DPR * z;
+  X.setTransform(s2, 0, 0, s2, (OX + sh) * DPR + W * SC * DPR * (1 - z) / 2, (OY + sv) * DPR + H * SC * DPR * (1 - z) / 2);
+  X.save(); X.beginPath(); X.rect(0, 0, W, H); X.clip();
+  sky(X);
+  if (st == 0) { title(); X.restore(); return }
+  if (st == 3) { ending(); X.restore(); return }
+
+  chasm(X); tiles(X);
+  var lp = st == 1 ? max(0, frame / LOOPF - .58) / .42 : 0;
+  if (cr > .02 || lp > 0) {                 // the world drains; the rainbows never do
+    X.globalCompositeOperation = 'saturation';
+    X.globalAlpha = min(.96, cr * .82 + lp * .45);
+    X.fillStyle = '#808080'; X.fillRect(0, 0, W, H);
+    X.globalAlpha = 1; X.globalCompositeOperation = 'source-over';
+  }
+  BX.setTransform(1, 0, 0, 1, 0, 0); BX.clearRect(0, 0, bc.width, bc.height);
+  var bs = bc.width / W; BX.setTransform(bs, 0, 0, bs, 0, 0);
+  beams(BX, 1); drawP(BX);
+  beams(X, 0);
+  if (star) star_(X);
+  var i, a;
+  for (i = 0; i < actors.length; i++) {
+    a = actors[i]; if (a.dead) continue;
+    if (i < ghosts.length) {
+      var pq = ghosts[i].pt;                       // where this ghost walks: dotted route
+      X.globalAlpha = .24; X.fillStyle = GC(i);
+      for (var j2 = 0; j2 < pq.length; j2 += 2) X.fillRect(pq[j2] - 1, pq[j2 + 1] - 1, 2, 2);
+      X.globalAlpha = .45;
+      X.fillStyle = GC(i);
+      X.beginPath(); X.ellipse(a.x, a.y - 1, 9, 2.6, 0, 0, TAU); X.fill();
+      X.globalAlpha = 1;
+      uni(X, a, .38 + .2 * M.pow(.94, ghosts.length - i), 0, i + 1, GC(i));
+    }
+  }
+  if (!pl.dead) {
+    rim(X, pl); uni(X, pl, 1, 0, 0, 0);
+    if (st == 1 && frame > LOOPF - 181) {          // last-3s ring, around you not in the HUD
+      X.strokeStyle = '#fff'; X.globalAlpha = .6; X.lineWidth = 1.7;
+      X.beginPath(); X.arc(pl.x, pl.y - 13, 13.5, -PI / 2, -PI / 2 + (LOOPF - frame) / 60 % 1 * TAU); X.stroke();
+      X.globalAlpha = 1;
+    }
+  }
+  drawP(X);
+  X.globalCompositeOperation = 'lighter';
+  X.globalAlpha = .3 + pulse * .22 + bt * .16; X.drawImage(bc, 0, 0, W, H);
+  X.globalAlpha = .1 + bt * .05; X.drawImage(bc, -7, -7, W + 14, H + 14);
+  X.globalAlpha = 1; X.globalCompositeOperation = 'source-over';
+  var vg = X.createRadialGradient(W / 2, H / 2, H * .3, W / 2, H / 2, H * .95);
+  vg.addColorStop(0, '#0000'); vg.addColorStop(1, 'rgba(12,4,26,' + (.32 + cr * .5) + ')');
+  X.fillStyle = vg; X.fillRect(0, 0, W, H);
+  if (cr > .5) {
+    X.globalAlpha = (cr - .5) * .28; X.fillStyle = '#000';
+    for (var y2 = 0; y2 < H; y2 += 3) X.fillRect(0, y2, W, 1);
+    X.globalAlpha = 1;
+  }
+  if (loopFlash > 0) { X.fillStyle = 'rgba(255,255,255,' + loopFlash * .3 + ')'; X.fillRect(0, 0, W, H) }
+  if (st == 1 && !port) touchUI(X);
+  hud();
+  X.restore();
+}
+function rim(g, a) {                     // the live unicorn gets a halo nothing else has
+  g.globalCompositeOperation = 'lighter'; g.globalAlpha = .17;
+  var rg = g.createRadialGradient(a.x, a.y - 13, 1, a.x, a.y - 13, 17);
+  rg.addColorStop(0, '#fff4d8'); rg.addColorStop(1, '#fff0');
+  g.fillStyle = rg; g.beginPath(); g.arc(a.x, a.y - 13, 17, 0, TAU); g.fill();
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+}
+function star_(g) {
+  g.save(); g.translate(star.x, star.y); g.rotate(star.in ? 0 : T * 1.6);
+  g.fillStyle = '#ffd24a'; g.beginPath();
+  for (var z = 0; z < 10; z++) { var r = z & 1 ? 2.6 : 6.6, an = z * PI / 5 - PI / 2; g[z ? 'lineTo' : 'moveTo'](cos(an) * r, sin(an) * r) }
+  g.closePath(); g.fill();
+  g.fillStyle = '#fff'; g.beginPath(); g.arc(-1.2, -1.6, 1.5, 0, TAU); g.fill();
+  g.restore();
+  BX.globalCompositeOperation = 'lighter'; BX.fillStyle = '#fc3'; BX.globalAlpha = star.in ? 1 : .7;
+  BX.beginPath(); BX.arc(star.x, star.y, star.in ? 13 : 9, 0, TAU); BX.fill();
+  BX.globalAlpha = 1; BX.globalCompositeOperation = 'source-over';
+}
+
+function hud() {
+  var g = X, L = LEV[li], pr = 1 - frame / LOOPF, i, bx = 8, bw = W - 16;
+  g.textAlign = 'left';
+  g.fillStyle = 'rgba(10,4,22,.4)'; g.fillRect(bx, 6, bw, 5);
+  var bg = g.createLinearGradient(bx, 0, bx + bw, 0);
+  for (i = 0; i < 6; i++) bg.addColorStop(i / 5, RB[i]);
+  g.fillStyle = pr < .23 ? (frame >> 3 & 1 ? '#f45' : '#fa6') : bg;
+  g.fillRect(bx, 6, bw * pr, 5);
+  // one thin lane per ghost: how long each one lives, and a shared playhead
+  for (i = 0; i < ghosts.length; i++) {
+    g.globalAlpha = actors[i] && !actors[i].dead ? .6 : .18;
+    g.fillStyle = GC(i);
+    g.fillRect(bx, 12.5 + i * 1.9, bw * (ghosts[i].n / LOOPF), 1.1);
+  }
+  g.globalAlpha = 1;
+  g.fillStyle = '#fff';
+  g.fillRect(bx + bw * (1 - pr) - .5, 5, 1, 7.5 + ghosts.length * 1.9);
+  var hy = 21 + ghosts.length * 1.9, i2, sl = spareLeft();
+  lab(g, 'HERD ' + (ghosts.length + (st == 2 ? 0 : 1)) + '/' + (allow() + 1) + (best[li] ? '   BEST ' + best[li] : '   PAR ' + (L.p + 1)), bx, hy, 0,
+      ghosts.length - (st == 2 ? 1 : 0) > allow() ? '#ff9ec4' : '#fff');
+  lab(g, L.n, W / 2, 22, 1, '#fff');
+  g.font = FT(6.5); lab(g, 'WONDER: ' + max(1, M.round((1 - cr) * 100)) + '%', W - 8, 22, 2, cr > .5 ? '#ff9ec4' : 'rgba(255,255,255,.85)');
+  // the reserve: 13 spare unicorns for the whole game
+  for (i2 = 0; i2 < SPMAX; i2++) {
+    var on = i2 < sl;
+    g.globalAlpha = on ? 1 : .22;
+    g.fillStyle = on ? RB[i2 % 6] : '#fff';
+    g.beginPath(); g.arc(W - 8 - i2 * 6.4 - 3, 31, 2.2, 0, TAU); g.fill();
+  }
+  g.globalAlpha = 1;
+  g.font = FT(5.5); lab(g, 'SPARE', W - 8 - SPMAX * 6.4 - 8, 33, 2, 'rgba(255,255,255,.6)');
+  g.textAlign = 'left';
+  if (li < 3 && st == 1) {
+    g.font = FT(6); g.fillStyle = 'rgba(255,255,255,.5)';
+    g.fillText(touchOn ? 'L/R MOVE   ▲ JUMP   tap top-right: NEW LOOP' :
+      '←→ MOVE ↑ JUMP R NEW LOOP C RETRY Q UNDO SHIFT FAST', 8, H - 7);
+  }
+  // the one instruction the whole game depends on, shown exactly when it makes sense
+  if (li == 1 && st == 1 && !ghosts.length && (plates[0] | plates[1] | plates[2])) {
+    g.globalAlpha = .72 + sin(T * 5) * .28; g.font = FT(9, 1);
+    lab(g, touchOn ? 'NOW TAP \u21ba TO LEAVE A COPY OF YOURSELF HERE'
+                   : 'NOW PRESS R TO LEAVE A COPY OF YOURSELF HERE', W / 2, H - 32, 1, '#fff');
+    g.globalAlpha = 1; g.textAlign = 'left';
+  }
+  if (intro > 0 && st == 1) {
+    var al = min(1, intro * 1.6) * min(1, (2.4 - intro) * 3.5);
+    g.textAlign = 'center'; g.globalAlpha = al;
+    bigText(L.t, W / 2, H / 2 - 6, 19);
+    g.globalAlpha = 1; g.textAlign = 'left';
+  }
+  if (st == 1 && ghosts.length + 1 > allow() && spareLeft() < 1) {
+    g.globalAlpha = .5 + sin(T * 4) * .3; g.font = FT(7, 1);   // the way out stays on screen
+    lab(g, touchOn ? '\u2161 MENU \u00b7 \u21b6 TAKE ONE BACK' : 'HERD EXHAUSTED \u00b7 Q UNDO \u00b7 ESC MENU', W / 2, H - 20, 1, '#ff9ec4');
+    g.globalAlpha = 1; g.textAlign = 'left';
+  }
+  if (st == 2) {
+    g.textAlign = 'center';
+    g.globalAlpha = min(1, ccT * 2);
+    bigText(['WONDERFUL!', 'STILL WONDERFUL!', 'WONDERFUL.', 'W O N D E R F U L'][min(3, li >> 2)], W / 2, 52, 21);
+    var nu = ghosts.length;
+    g.font = FT(8, 1);
+    outline(g, nu + (nu == 1 ? ' UNICORN WAS REQUIRED' : ' UNICORNS WERE REQUIRED'), W / 2, H - 10, '#fff');
+    if (refund) { g.font = FT(9, 1); g.fillStyle = '#9f9'; g.fillText('PAR MET \u2014 ONE UNICORN RETURNED TO THE RESERVE', W / 2, 72) }
+    g.font = FT(7);
+    outline(g, POST[li] || '', W / 2, H - 24, cr > .5 ? '#ffc6dd' : '#fff');
+    g.globalAlpha = 1; g.textAlign = 'left';
+  }
+  if (pz) {                                        // the world waits for no one - but it will wait here
+    X.fillStyle = 'rgba(10,4,22,.78)'; X.fillRect(0, 0, W, H);
+    X.textAlign = 'center';
+    bigText('PAUSED', W / 2, H * .32, 17);
+    var MI = ['RESUME', 'RESTART', 'MENU'];
+    X.font = FT(9, 1);
+    for (i = 0; i < 3; i++)
+      outline(X, (i == msel ? '\u25b8 ' : '') + MI[i], W / 2, H * .44 + i * 15, i == msel ? '#fff' : 'rgba(255,255,255,.55)');
+    X.font = FT(6); outline(X, touchOn ? '\u25c0\u25b6 PICK \u21ba OK' : 'W/S\u2191\u2193 PICK ENTER OK', W / 2, H * .44 + 56, 'rgba(255,255,255,.5)');
+    X.textAlign = 'left';
+  }
+}
+function padUI() {                             // the buttons under the screen
+  var g = X, ph = VH - (OY + H * SC), cy = OY + H * SC + ph * .36, R = M.min(ph * .19, VW * .125);
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  var cx = VW * .2, w = R * .38;
+  g.fillStyle = '#3a3542';
+  g.beginPath(); g.roundRect(cx - R, cy - w, R * 2, w * 2, 5); g.fill();
+  g.beginPath(); g.roundRect(cx - w, cy - R, w * 2, R * 2, 5); g.fill();
+  g.fillStyle = '#b23a74';
+  g.beginPath(); g.arc(VW * .8, cy, R * .78, 0, TAU); g.fill();
+  g.strokeStyle = '#8e2d5c'; g.lineWidth = 3; g.stroke();
+  g.fillStyle = '#fff'; g.font = FT(11, 1); g.textAlign = 'center';
+  g.fillText('A', VW * .8, cy + 4);
+  g.font = FT(9, 1);
+  for (i = 0; i < 4; i++) {
+    var px = VW * (.26 + i * .125);
+    g.fillStyle = '#8e8698';
+    g.beginPath(); g.roundRect(px, cy + ph * .42 - M.min(ph * .06, 15), VW * .105, M.min(ph * .12, 30), 8); g.fill();
+    g.fillStyle = '#241f30'; g.fillText('\u21b6\u2161\u00bb\u21ba'[i], px + VW * .0525, cy + ph * .42 + 3);
+  }
+  g.textAlign = 'left';
+}
+function lab(g, s, x, y, al, col) {         // text stays legible on any sky
+  g.textAlign = ['left', 'center', 'right'][al];
+  outline(g, s, x, y, col);
+}
+function outline(g, s, x, y, col) {
+  g.strokeStyle = 'rgba(16,6,30,.85)'; g.lineWidth = 3; g.lineJoin = 'round';
+  g.strokeText(s, x, y); g.fillStyle = col; g.fillText(s, x, y);
+}
+function bigText(s, x, y, sz) {
+  X.font = FT(sz, 1);
+  X.strokeStyle = 'rgba(28,8,44,.9)'; X.lineWidth = sz / 4.5; X.lineJoin = 'round';
+  X.strokeText(s, x, y); X.fillStyle = '#fff'; X.fillText(s, x, y);
+}
+
+var demo = { x: 0, y: 0, vx: 0, vy: 0, g: 1, pg: 1, f: 1, ct: 0, jb: 0, sq: 1, an: 0, i: 0, dead: 0, hold: 0 };
+function title() {
+  var g = X, i;
+  demo.x = W / 2 + sin(T * .9) * 90; demo.f = cos(T * .9) > 0 ? 1 : -1;
+  demo.y = H * .62 + abs(sin(T * 2.6)) * -14; demo.an = T * 7; demo.vx = 2; demo.g = 1;
+  uni(g, demo, 1, 0, 0, 0);
+  g.textAlign = 'center';
+  bigText('WONDERFULNESS', W / 2, H * .24, 31);
+  bigText('IS MANDATORY', W / 2, H * .24 + 26, 31);
+  g.font = FT(8); g.fillStyle = 'rgba(255,255,255,.82)';
+  g.fillText('thirteen seconds. every loop leaves a friend behind.', W / 2, H * .24 + 44);
+  // level select
+  var n = LEV.length, tw = 15, x0 = W / 2 - n * tw / 2;
+  for (i = 0; i < n; i++) {
+    var ok = i <= maxL, on = i == sel;
+    g.globalAlpha = ok ? 1 : .25;
+    g.fillStyle = on ? '#fff' : best[i] ? RB[i % 6] : 'rgba(255,255,255,.35)';
+    g.beginPath(); g.roundRect(x0 + i * tw + 1.5, H * .8, tw - 3, 11, 3); g.fill();
+    g.fillStyle = on ? '#221033' : 'rgba(20,8,34,.85)'; g.font = FT(6.5, 1);
+    g.fillText(i + 1, x0 + i * tw + tw / 2, H * .8 + 8.2);
+    g.globalAlpha = 1;
+  }
+  g.font = FT(7); g.fillStyle = 'rgba(255,255,255,.85)';
+  g.globalAlpha = .55 + sin(T * 4) * .35;
+  g.fillText(touchOn ? 'TAP TO BEGIN' : '←→ PICK A CHAPTER      ↑ / ENTER TO BEGIN', W / 2, H * .8 + 24);
+  g.globalAlpha = 1; g.textAlign = 'left';
+}
+function ending() {
+  var g = X, i, n = min(120, total), t = endT;
+  g.textAlign = 'center';
+  for (i = 0; i < n; i++) {
+    var p = i / n, x = ((rnd(i * 3.7) * W * 1.3) + t * (8 + rnd(i) * 22)) % (W + 60) - 30;
+    var y = 30 + rnd(i * 9.1) * (H - 60), s = .35 + rnd(i * 5.3) * .5;
+    g.globalAlpha = min(.5, t * .12) * (.25 + p * .4);
+    g.save(); g.translate(x, y); g.scale(s, s);
+    demo.x = 0; demo.y = 0; demo.an = t * 5 + i; demo.f = 1; demo.vx = 2; demo.g = 1;
+    uni(g, demo, 1, '#c9b6e8', 0, 0);
+    g.restore();
+  }
+  g.globalAlpha = 1;
+  if (t > .6) bigText('YOU HAVE REACHED THE END OF THE RAINBOW.', W / 2, H * .26, 13);
+  if (t > 1.8) { g.font = FT(9); g.fillStyle = '#ffc6dd'; g.fillText('IT IS A DOOR. IT ISSUES A NEW MEADOW.', W / 2, H * .38) }
+  if (t > 3.2) { g.font = FT(10, 1); g.fillStyle = '#fff'; g.fillText('UNICORNS SPENT: ' + total, W / 2, H * .5);
+    g.fillStyle = spare > 6 ? '#9f9' : '#ffd0e4'; g.fillText('RESERVE INTACT: ' + spare + ' / ' + SPMAX, W / 2, H * .58) }
+  if (t > 4.6) { g.font = FT(9); g.fillStyle = '#f9b'; g.fillText('THEY ARE ALL STILL STANDING WHERE YOU LEFT THEM.', W / 2, H * .66) }
+  if (t > 5.8) { g.font = FT(9, 1); g.fillStyle = '#fff'; g.globalAlpha = .6 + sin(T * 4) * .35; g.fillText('A NEW UNICORN HAS BEEN ISSUED.', W / 2, H * .78); g.globalAlpha = 1 }
+  g.textAlign = 'left';
+}
+
+load(); resize(); last = performance.now();
+requestAnimationFrame(loop);
+</script><script>
+(function () {
+  var FLAT = [[{"x":424}],[{"x":104,"hold":900},{"commit":true},{"x":408}],[{"x":88,"hold":900},{"commit":true},{"x":424}],[{"x":56,"hold":340},{"x":8},{"commit":true},{"x":440}],[{"x":40,"hold":340},{"x":88,"hold":900},{"commit":true},{"x":440}],[{"x":72,"hold":900},{"commit":true},{"x":296,"hold":900},{"commit":true},{"x":456}],[{"x":56,"hold":900},{"commit":true},{"x":184,"hold":380},{"x":120,"hold":900},{"commit":true},{"x":472}],[{"x":56,"hold":900},{"commit":true},{"x":184,"hold":380},{"x":120,"hold":900},{"commit":true},{"x":440}],[{"x":56,"hold":900},{"commit":true},{"x":88,"hold":900},{"commit":true},{"x":136,"hold":900},{"commit":true},{"x":456},{"x":104,"hold":20},{"x":8}],[{"x":6,"hold":900},{"commit":true},{"x":56,"hold":900},{"commit":true},{"x":168,"hold":900},{"commit":true},{"x":296,"hold":900},{"commit":true},{"x":456}],[{"x":40,"hold":900},{"commit":true},{"x":72,"hold":900},{"commit":true},{"x":104,"hold":900},{"commit":true},{"x":200,"hold":900},{"commit":true},{"x":456}],[{"x":72,"hold":900},{"commit":true},{"x":136,"hold":900},{"commit":true},{"x":184,"hold":900},{"commit":true},{"x":40,"hold":900},{"commit":true},{"x":216,"hold":900},{"commit":true},{"x":456}],[{"x":40,"hold":900},{"commit":true},{"x":72,"hold":900},{"commit":true},{"x":104,"hold":900},{"commit":true},{"x":456}]];
+  var SHOTS = [[0,260,'g01_run'],[1,480,'l02_ghost'],[4,420,'l05_bridge'],
+               [8,430,'l09_star'],[11,430,'l12_herd'],[12,380,'l13_light']];
+  var taken = {}, errs = '';
+  function shot(name) {
+    try { fetch('/shot?n=' + name, { method: 'POST',
+      body: document.getElementById('c').toDataURL('image/png') }); } catch (e) {}
+  }
+  function fail(e) { window.__err = String((e && e.message) || e); window.__si = cur ? cur.si : -1; window.__n = cur ? cur.n : -1; errs += e + ';'; try {
+    var x = document.getElementById('c').getContext('2d');
+    x.fillStyle = '#000'; x.fillRect(0, 0, W, H);
+    x.fillStyle = '#fff'; x.font = '14px monospace';
+    String(errs).split(';').forEach(function (l, i) { x.fillText(l.slice(0, 60), 10, 30 + i * 20) });
+    shot('ERRORS');
+  } catch (e2) {} }
+  window.onerror = function (m) { fail(m); return false; };
+  var markN = 0;
+  function mark(tag) {
+    try {
+      var mc = document.createElement('canvas'); mc.width = 60; mc.height = 10;
+      var mx = mc.getContext('2d'); mx.fillStyle = '#111'; mx.fillRect(0, 0, 60, 10);
+      mx.fillStyle = '#5f5'; mx.font = '9px monospace'; mx.fillText(String(tag).slice(0, 14), 2, 8);
+      fetch('/shot?n=m' + (markN++) + '_' + tag, { method: 'POST', body: mc.toDataURL('image/png') });
+    } catch (e) {}
+  }
+  window.mark = mark;
+  var cur = null, lastFrame = 0, justC = false;
+  var started = {};
+  try {
+    var _tick = tick;
+    tick = function () {
+      try { step(); } catch (e) { fail(e); try { _tick(); } catch (e2) {} }
+    };
+    function step() {
+      if (st === 0) { _tick(); return; }
+      if (st === 3) {
+        _tick();
+        if (!taken['ending']) { taken['ending'] = 1; setTimeout(function () { shot('ending'); }, 6500); }
+        return;
+      }
+      var i;
+      for (i = 0; i < SHOTS.length; i++) {
+        var sh = SHOTS[i];
+        if (st === 1 && li === sh[0] && frame === sh[1] && !taken[sh[2]]) { taken[sh[2]] = 1; shot(sh[2]); }
+      }
+      if (st === 2) {
+        if (!taken['w' + li]) { taken['w' + li] = 1; mark('cc_L' + li + '_f' + frame); }
+        if (!taken['W' + li]) { taken['w' + li] = 1; if ([0, 1, 4].indexOf(li) >= 0) shot('win_L' + (li + 1)); }
+        _tick(); won = 0; return;
+      }
+      if (!started['L' + li]) { started['L' + li] = 1; cur = { si: 0, n: 0, acted: false }; lastFrame = 0; justC = false; mark('go_L' + li + '_f' + frame); }
+      window.__si = cur.si; window.__n = cur.n;
+      var wrapped = frame < lastFrame;
+      lastFrame = frame;
+      if (wrapped && !justC) {           // auto-commit satisfied the hold:
+        cur.si += 2;                     //   drop the hold step AND its commit marker
+        cur.n = 0; cur.acted = false;
+        mark('wrap_L' + li + '_si' + cur.si);
+      }
+      justC = false;
+      if (!(frame % 120)) mark('L' + li + '_f' + frame);
+      var plan = FLAT[li];
+      var s = plan[cur.si];
+      if (s && s.commit) { justC = true; commitLoop(); cur = { si: cur.si + 1, n: 0, acted: false }; _tick(); return; }
+      if (!s) { K = 0; _tick(); return; }
+      var a = pl, k = 0;
+      var tx = s.x == null ? a.x : s.x, dx = tx - a.x;
+      var arrived = Math.abs(dx) <= 2.5;
+      if (dx < -2.5) k |= 1; else if (dx > 2.5) k |= 2;
+      if ((s.j || s.up) && a.g && !arrived) k |= 4;
+      if ((k & 3) && Math.abs(a.vx) < .1 && a.g) k |= 4;
+      if (arrived && s.a && !cur.acted) k |= 8;
+      K = k;
+      _tick();
+      if (won || pl.dead) { if (pl.dead) cur = { si: 0, n: 0, acted: false }; return; }
+      if (arrived) {
+        if (s.a && !cur.acted) cur.acted = true;
+        cur.n++;
+        if (cur.n > (s.hold || 0)) { cur.si++; cur.n = 0; cur.acted = false; }
+      } else cur.n = 0;
+    }
+    startLevel(0);
+    setTimeout(function () { shot('dbg_start'); }, 1500);
+  } catch (e) { fail(e); }
+})();</script>

@@ -155,7 +155,6 @@ function tiles(g) {
         g.lineTo(x + TS, y + 6); g.fill();
         g.fillStyle = w ? '#688a75' : '#a9ef92';
         g.fillRect(x, y + 4.4, TS, 1.6);
-        if ((cx * 7 + cy * 13) % 5 == 0) flower(g, x + 8, y + 1, cx + cy);
       }
     } else if (t == CLOUD) {
       g.fillStyle = w ? 'rgba(190,180,205,.85)' : 'rgba(255,255,255,.93)';
@@ -267,23 +266,6 @@ function tiles(g) {
     }
   }
 }
-function flower(g, x, y, sd) {
-  var h = rnd(sd) * 4 + 3, cn = flr(rnd(sd * 3) * 4);
-  g.strokeStyle = cr > .6 ? '#4a6b5e' : '#4fae52'; g.lineWidth = 1;
-  g.beginPath(); g.moveTo(x, y + 1); g.lineTo(x + sin(T * 1.6 + sd) * 1.2, y - h); g.stroke();
-  var fy = y - h;
-  g.fillStyle = cr > .7 ? '#54406a' : ['#ff8fb0', '#ffd76a', '#b28fff', '#8fe6ff'][cn];
-  for (var i = 0; i < 5; i++) { g.beginPath(); g.arc(x + cos(i * 1.257) * 2.1, fy + sin(i * 1.257) * 2.1, 1.5, 0, TAU); g.fill() }
-  g.fillStyle = cr > .7 ? '#1a1020' : '#ffe9a0'; g.beginPath(); g.arc(x, fy, 1.7, 0, TAU); g.fill();
-  g.fillStyle = '#3a2030';
-  g.fillRect(x - 1, fy - .6, .55, .55); g.fillRect(x + .5, fy - .6, .55, .55);
-  g.beginPath();
-  if (cr < .45) g.arc(x, fy + .2, 1, .2, PI - .2);
-  else if (cr < .8) g.moveTo(x - .9, fy + .9), g.lineTo(x + .9, fy + .9);
-  else g.arc(x, fy + 1.5, 1, PI + .2, -.2);
-  g.strokeStyle = '#3a2030'; g.lineWidth = .4; g.stroke();
-}
-
 // ---------- beams ----------
 // a beam carries a colour mask; we draw it as one stripe per component, so a
 // full-spectrum (mask 7) beam is literally a rainbow ribbon you can stand on.
@@ -401,16 +383,6 @@ function sky(g) {
     g.ellipse(cxp - 13 * sc2, cyp + 2.5, 10 * sc2, 5 * sc2, 0, 0, TAU);
     g.fill();
   }
-  // pollen / dust drifting through the air
-  g.globalCompositeOperation = 'lighter';
-  for (i = 0; i < 22; i++) {
-    var mx = (rnd(i * 11.3) * W + T * (5 + rnd(i) * 9)) % (W + 30) - 15;
-    var my = (rnd(i * 2.9) * H + sin(T * .5 + i) * 9) % H;
-    g.globalAlpha = (.28 - cr * .18) * (.4 + rnd(i * 5.1) * .6);
-    if (g.globalAlpha <= 0) break;
-    g.fillStyle = cr > .5 ? '#c9b6e8' : RB[i % 6];
-    g.beginPath(); g.arc(mx, my, .8 + rnd(i * 8.8) * 1.1, 0, TAU); g.fill();
-  }
   g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 }
 
@@ -438,20 +410,3 @@ function touchUI(g) {
   g.globalAlpha = 1; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
 }
 
-// ---------- first-minutes signposting ----------
-function hint(g, li) {
-  if (li > 2) return;
-  var toPlate = hintX && !everPressed, x = toPlate ? hintX : goalX, y = toPlate ? hintY : goalY;
-  if (!x) return;
-  var bob = sin(T * 4) * 3, ty = y - 22 + bob;
-  g.globalAlpha = .55 + sin(T * 4) * .25;
-  g.fillStyle = '#fff';
-  g.beginPath(); g.moveTo(x, ty + 9); g.lineTo(x - 5, ty); g.lineTo(x + 5, ty); g.fill();
-  g.fillRect(x - 1.8, ty - 7, 3.6, 7);
-  if (toPlate) {
-    g.font = FT(6, 1); g.textAlign = 'center';
-    g.fillText('STAND HERE', x, ty - 11);
-    g.textAlign = 'left';
-  }
-  g.globalAlpha = 1;
-}

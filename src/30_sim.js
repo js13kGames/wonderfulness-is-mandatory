@@ -1,6 +1,6 @@
 // ================= SIMULATION =================
 var TT, TP, racc, bfloor, plates = [0, 0, 0], plateBy = [-1, -1, -1], power = 0, pulse = 0, pwOld = 0;
-var segs = [], spX, spY, stX, stY, hasStar, hintX = 0, hintY = 0, goalX = 0, goalY = 0, everPressed = 0, gndY = 224;
+var segs = [], spX, spY, stX, stY, hasStar, gndY = 224;
 var LOOPF = 780;                       // 13 seconds @ 60
 var ghosts = [], actors = [], rec, frame = 0, star = 0, pl;
 
@@ -9,7 +9,7 @@ function idx(cx, cy) { return cy * GW + cx }
 function parseLevel(m) {
   TT = new Uint8Array(GW * GH); TP = new Uint8Array(GW * GH);
   racc = new Uint8Array(GW * GH); bfloor = new Uint8Array(GW * GH);
-  hasStar = 0; spX = 24; spY = 100; hintX = hintY = 0; everPressed = 0;
+  hasStar = 0; spX = 24; spY = 100;
   var rows = m.split('\n'), y, x, ch, d;
   for (y = 0; y < GH; y++) {
     for (x = 0; x < GW; x++) {
@@ -19,8 +19,6 @@ function parseLevel(m) {
       d = CH[ch];
       if (d) {
         TT[idx(x, y)] = d[0]; TP[idx(x, y)] = d[1];
-        if (d[0] == PLATE && !hintX) { hintX = x * TS + 8; hintY = y * TS }
-        if (d[0] == GOAL) { goalX = x * TS + 8; goalY = y * TS }
       }
     }
   }
@@ -287,6 +285,6 @@ function press(x, y, w, who) {
   for (cx = flr((x - w) / TS); cx <= flr((x + w - .01) / TS); cx++) {
     if (cx < 0 || cx >= GW || cy < 0 || cy >= GH) continue;
     i = idx(cx, cy);
-    if (TT[i] == PLATE) { plates[TP[i]] = 1; everPressed = 1; if (plateBy[TP[i]] < 0) plateBy[TP[i]] = who }
+    if (TT[i] == PLATE) { plates[TP[i]] = 1; if (plateBy[TP[i]] < 0) plateBy[TP[i]] = who }
   }
 }

@@ -101,12 +101,20 @@ function loop(now) {
   }
   stepP(); shake *= .86;
   render(dt);
+  if (touchOn && port) padUI();
 }
 
 function render() {
   var sk = RM ? 0 : shake, sh = sk * (rnd(T * 313) - .5) * 2, sv = sk * (rnd(T * 71 + 5) - .5) * 2, z = st == 2 ? zoom : 1;
   X.setTransform(1, 0, 0, 1, 0, 0);
-  X.fillStyle = '#0d0a18'; X.fillRect(0, 0, c.width, c.height);
+  if (touchOn && port) {                       // the handheld shell
+    X.fillStyle = '#c9c2b1'; X.fillRect(0, 0, c.width, c.height);
+    X.setTransform(DPR, 0, 0, DPR, 0, 0);
+    X.fillStyle = '#4e493d';
+    X.beginPath(); X.roundRect(OX - 8, OY - 11, W * SC + 16, H * SC + 22, 9); X.fill();
+    X.globalAlpha = .25 + .75 * bt; X.fillStyle = '#ff5a5a';
+    X.beginPath(); X.arc(OX + 8, OY - 5.5, 1.9, 0, TAU); X.fill(); X.globalAlpha = 1;
+  } else { X.fillStyle = '#0d0a18'; X.fillRect(0, 0, c.width, c.height) }
   var s2 = SC * DPR * z;
   X.setTransform(s2, 0, 0, s2, (OX + sh) * DPR + W * SC * DPR * (1 - z) / 2, (OY + sv) * DPR + H * SC * DPR * (1 - z) / 2);
   X.save(); X.beginPath(); X.rect(0, 0, W, H); X.clip();
@@ -126,7 +134,6 @@ function render() {
   var bs = bc.width / W; BX.setTransform(bs, 0, 0, bs, 0, 0);
   beams(BX, 1); drawP(BX);
   beams(X, 0);
-  if (st == 1) hint(X, li);
   if (star) star_(X);
   var i, a;
   for (i = 0; i < actors.length; i++) {
@@ -164,7 +171,7 @@ function render() {
     X.globalAlpha = 1;
   }
   if (loopFlash > 0) { X.fillStyle = 'rgba(255,255,255,' + loopFlash * .3 + ')'; X.fillRect(0, 0, W, H) }
-  if (st == 1) touchUI(X);
+  if (st == 1 && !port) touchUI(X);
   hud();
   X.restore();
 }
@@ -242,11 +249,6 @@ function hud() {
     lab(g, touchOn ? '\u2161 MENU \u00b7 \u21b6 TAKE ONE BACK' : 'HERD EXHAUSTED \u00b7 Q UNDO \u00b7 ESC MENU', W / 2, H - 20, 1, '#ff9ec4');
     g.globalAlpha = 1; g.textAlign = 'left';
   }
-  if (denied > 0) {
-    g.textAlign = 'center'; g.globalAlpha = min(1, denied * 2);
-    bigText('THE HERD IS EXHAUSTED', W / 2, H / 2 - 8, 16);
-    g.globalAlpha = 1; g.textAlign = 'left';
-  }
   if (st == 2) {
     g.textAlign = 'center';
     g.globalAlpha = min(1, ccT * 2);
@@ -270,6 +272,27 @@ function hud() {
     X.font = FT(6); outline(X, touchOn ? '\u25c0\u25b6 PICK \u21ba OK' : 'W/S\u2191\u2193 PICK ENTER OK', W / 2, H * .44 + 56, 'rgba(255,255,255,.5)');
     X.textAlign = 'left';
   }
+}
+function padUI() {                             // the buttons under the screen
+  var g = X, ph = VH - (OY + H * SC), cy = OY + H * SC + ph * .36, R = M.min(ph * .19, VW * .125);
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  var cx = VW * .2, w = R * .38;
+  g.fillStyle = '#3a3542';
+  g.beginPath(); g.roundRect(cx - R, cy - w, R * 2, w * 2, 5); g.fill();
+  g.beginPath(); g.roundRect(cx - w, cy - R, w * 2, R * 2, 5); g.fill();
+  g.fillStyle = '#b23a74';
+  g.beginPath(); g.arc(VW * .8, cy, R * .78, 0, TAU); g.fill();
+  g.strokeStyle = '#8e2d5c'; g.lineWidth = 3; g.stroke();
+  g.fillStyle = '#fff'; g.font = FT(11, 1); g.textAlign = 'center';
+  g.fillText('A', VW * .8, cy + 4);
+  g.font = FT(9, 1);
+  for (i = 0; i < 4; i++) {
+    var px = VW * (.26 + i * .125);
+    g.fillStyle = '#8e8698';
+    g.beginPath(); g.roundRect(px, cy + ph * .42 - M.min(ph * .06, 15), VW * .105, M.min(ph * .12, 30), 8); g.fill();
+    g.fillStyle = '#241f30'; g.fillText('\u21b6\u2161\u00bb\u21ba'[i], px + VW * .0525, cy + ph * .42 + 3);
+  }
+  g.textAlign = 'left';
 }
 function lab(g, s, x, y, al, col) {         // text stays legible on any sky
   g.textAlign = ['left', 'center', 'right'][al];

@@ -7,14 +7,15 @@ var X = c.getContext('2d');
 var bc = document.createElement('canvas'), BX;
 bc.width = 240; bc.height = 136; BX = bc.getContext('2d');
 
-var VW = 1, VH = 1, SC = 1, OX = 0, OY = 0, DPR = 1;
+var VW = 1, VH = 1, SC = 1, OX = 0, OY = 0, DPR = 1, port = 0;
 function resize() {
   DPR = Math.min(2, devicePixelRatio || 1);
   VW = innerWidth; VH = innerHeight;
   c.width = VW * DPR | 0; c.height = VH * DPR | 0;
   c.style.width = VW + 'px'; c.style.height = VH + 'px';
+  port = touchOn && VH > VW * 1.2;
   SC = Math.min(VW / W, VH / H);
-  OX = (VW - W * SC) / 2; OY = (VH - H * SC) / 2;
+  OX = (VW - W * SC) / 2; OY = (VH - H * SC) * (port ? .3 : .5);
 }
 onresize = resize;
 
@@ -79,12 +80,27 @@ try { RM = +matchMedia('(prefers-reduced-motion:reduce)').matches } catch (e) {}
 function tpt(t) { return [(t.clientX - OX) / SC, (t.clientY - OY) / SC] }
 function tupd(e) {
   e.preventDefault(); touchOn = 1; anyK = 1; A0();
-  var k = 0, m = 0, i, p;
+  var k = 0, m = 0, i, p, q, sx, sy, ddx, ddy, ph;
   for (i = 0; i < e.touches.length; i++) {
-    p = tpt(e.touches[i]);
-    if (p[1] > H * .46) k |= p[0] < W * .13 ? 1 : p[0] < W * .27 ? 2 : p[0] > W * .87 ? 8 : p[0] > W * .72 ? 4 : 0;
-    else if (p[0] > W * .87) m |= 1; else if (p[0] > W * .74) m |= 2; else if (p[0] < W * .13) m |= 4;
-    else if (p[0] > W * .43 && p[0] < W * .57) m |= 128;
+    sx = e.touches[i].clientX; sy = e.touches[i].clientY;
+    if (!port) {
+      p = tpt(e.touches[i]);
+      if (p[1] > H * .46) k |= p[0] < W * .13 ? 1 : p[0] < W * .27 ? 2 : p[0] > W * .87 ? 8 : p[0] > W * .72 ? 4 : 0;
+      else if (p[0] > W * .87) m |= 1; else if (p[0] > W * .74) m |= 2; else if (p[0] < W * .13) m |= 4;
+      else if (p[0] > W * .43 && p[0] < W * .57) m |= 128;
+    } else {
+      ph = VH - (OY + H * SC);
+      if (sy < OY + H * SC) { k |= 4; continue }          // screen tap: jump / begin / skip
+      ddx = sx - VW * .2; ddy = sy - OY - H * SC - ph * .36;
+      var rr = M.min(ph * .19, VW * .125);
+      if (ddx * ddx + ddy * ddy < rr * rr * 1.25) {        // d-pad cross
+        if (abs(ddx) > abs(ddy)) k |= ddx < 0 ? 1 : 2; else k |= ddy < 0 ? 4 : 8;
+      } else if (abs(sx - VW * .8) < rr * .8 && abs(ddy) < rr * .8) k |= 4;   // A
+      if (abs(sy - (OY + H * SC + ph * .78)) < ph * .065)
+        for (q = 0; q < 4; q++)
+          if (sx > VW * (.26 + q * .125) && sx < VW * (.26 + q * .125 + .105))
+            m |= [2, 128, 4, 1][q];
+    }
   }
   tK = k; tM = m;
 }
