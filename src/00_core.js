@@ -73,9 +73,8 @@ onkeydown = e => {
 onkeyup = e => { kbK &= ~(kmap[e.code] | 0); kbM &= ~(mmap[e.code] | 0) };
 onblur = () => { kbK = kbM = 0 };
 
-var touchOn = 0;
-try { touchOn = matchMedia('(pointer:coarse)').matches ? 1 : 0 } catch (e) {}
-var RM = 0;                            // prefers-reduced-motion: no shake, no iris wipe
+var touchOn = 'ontouchstart' in self;
+var RM = 0;
 try { RM = +matchMedia('(prefers-reduced-motion:reduce)').matches } catch (e) {}
 function tpt(t) { return [(t.clientX - OX) / SC, (t.clientY - OY) / SC] }
 function tupd(e) {

@@ -6,9 +6,9 @@ var spare = 13, SPMAX = 13, refund = 0, denied = 0;
 var bt = 0, pz = 0, msel = 0;
 function GC(i) { return 'hsl(' + ((i * 67 + 24) % 360) + ',92%,66%)' }
 var POST = ("THE END OF THE RAINBOW IS THIS WAY!|SHE WILL WAIT HERE. SHE DOESN'T MIND.|" +
-  "YOU ARE MAKING EXCELLENT PROGRESS.|" +
-  "SHE STOOD THERE UNTIL YOU WERE ACROSS.|ONE OF YOU IS ENOUGH, IF SHE HURRIES.|" +
-  "THE LIGHT DOES NOT MIND BEING BLOCKED.|PLEASE DO NOT LOOK BACK AT THE MEADOW.|" +
+  "EXCELLENT PROGRESS.|" +
+  "SHE STOOD UNTIL YOU CROSSED.|ONE OF YOU IS ENOUGH, IF SHE HURRIES.|" +
+  "THE LIGHT DOES NOT MIND BEING BLOCKED.|DO NOT LOOK BACK.|" +
   "TWO COLOURS. ONE OF YOU. AS DESIGNED.|THE STAR WAS NEVER YOURS TO CARRY.|" +
   "THEY ARE STILL STANDING. ALL OF THEM.|A BODY IS A COMPONENT. YOU KNEW THAT.|" +
   "THE HERD IS A NUMBER. THE NUMBER IS YOU.|THERE IS NO OTHER SIDE.").split('|');
@@ -67,9 +67,9 @@ function loop(now) {
   bt = st && st < 3 ? max(0, 1 - frame % 60 / 14) : max(0, 1 - T % 1 * 4);   // the clock, made visible
   if (st == 1 && MP & 128) { pz ^= 1; if (A) pz ? A.suspend() : A.resume() }   // freeze the song WITH the sim
   if (pz) {
-    if (KP & 1) { msel += 2; msel %= 3 }
-    if (KP & 2) msel = (msel + 1) % 3;
-    if (MP & 1 || KP & 4) {
+    if (KP & 4 || KP & 1) { msel += 2; msel %= 3 }
+    if (KP & 8 || KP & 2) msel = (msel + 1) % 3;
+    if (MP & 1) {
       if (msel == 1) { pz = 0; ghosts = []; resetWorld(); if (A) A.resume() }
       else if (msel == 2) { pz = 0; st = 0; sel = li; if (A) A.resume() }
       else { pz = 0; if (A) A.resume() }
@@ -208,7 +208,7 @@ function hud() {
   lab(g, 'HERD ' + (ghosts.length + (st == 2 ? 0 : 1)) + '/' + (allow() + 1) + (best[li] ? '   BEST ' + best[li] : '   PAR ' + (L.p + 1)), bx, hy, 0,
       ghosts.length - (st == 2 ? 1 : 0) > allow() ? '#ff9ec4' : '#fff');
   lab(g, L.n, W / 2, 22, 1, '#fff');
-  g.font = FT(6.5); lab(g, 'WONDERFULNESS: ' + max(1, M.round((1 - cr) * 100)) + '%', W - 8, 22, 2, cr > .5 ? '#ff9ec4' : 'rgba(255,255,255,.85)');
+  g.font = FT(6.5); lab(g, 'WONDER: ' + max(1, M.round((1 - cr) * 100)) + '%', W - 8, 22, 2, cr > .5 ? '#ff9ec4' : 'rgba(255,255,255,.85)');
   // the reserve: 13 spare unicorns for the whole game
   for (i2 = 0; i2 < SPMAX; i2++) {
     var on = i2 < sl;
@@ -267,6 +267,7 @@ function hud() {
     X.font = FT(9, 1);
     for (i = 0; i < 3; i++)
       outline(X, (i == msel ? '\u25b8 ' : '') + MI[i], W / 2, H * .44 + i * 15, i == msel ? '#fff' : 'rgba(255,255,255,.55)');
+    X.font = FT(6); outline(X, touchOn ? '\u25c0\u25b6 PICK \u21ba OK' : 'W/S\u2191\u2193 PICK ENTER OK', W / 2, H * .44 + 56, 'rgba(255,255,255,.5)');
     X.textAlign = 'left';
   }
 }
@@ -284,7 +285,7 @@ function bigText(s, x, y, sz) {
   X.strokeText(s, x, y); X.fillStyle = '#fff'; X.fillText(s, x, y);
 }
 
-var demo = { x: 0, y: 0, vx: 0, vy: 0, g: 1, pg: 1, f: 1, ct: 0, jb: 0, sq: 1, an: 0, i: 0, dead: 0, hold: 0, tr: [] };
+var demo = { x: 0, y: 0, vx: 0, vy: 0, g: 1, pg: 1, f: 1, ct: 0, jb: 0, sq: 1, an: 0, i: 0, dead: 0, hold: 0 };
 function title() {
   var g = X, i;
   demo.x = W / 2 + sin(T * .9) * 90; demo.f = cos(T * .9) > 0 ? 1 : -1;

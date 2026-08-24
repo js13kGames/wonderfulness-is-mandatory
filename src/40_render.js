@@ -428,10 +428,10 @@ function touchUI(g) {
   for (i = 0; i < TB.length; i++) {
     b = TB[i]; x = b[0] * W; y = b[1] * H; w = b[2] * W; h = b[3] * H;
     on = (b[5] && (K & b[5])) || (b[6] && (meta & b[6]));
-    g.globalAlpha = on ? .3 : .12;
+    g.globalAlpha = on ? .45 : .2;
     g.fillStyle = '#fff';
     g.beginPath(); g.roundRect(x + 3, y + 3, w - 6, h - 6, 7); g.fill();
-    g.globalAlpha = on ? .95 : .5;
+    g.globalAlpha = on ? .95 : .65;
     g.font = FT(b[6] ? 13 : 17, 1);
     g.fillText(b[4], x + w / 2, y + h / 2);
   }
