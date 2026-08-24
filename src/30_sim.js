@@ -218,9 +218,11 @@ function resetWorld() {
 function commitLoop() {
   if (frame < 5) { sfx(6); resetWorld(); return }
   if (ghosts.length + 1 > allow() && spareLeft() < 1) { denied = 2.6; sfx(6); return }
-  ghosts.push({ i: rec.slice(0, frame), n: frame, pt: pl.pt }); sfx(5);
+  var n = frame || 1;                                   // guarantee ≥1 frame of life
+  ghosts.push({ i: rec.slice(0, frame), n: n, pt: pl.pt }); sfx(5);
   resetWorld();
 }
+function stuck() { return ghosts.length + 1 > allow() && spareLeft() < 1 }
 function undoLoop() { if (ghosts.length) { ghosts.pop(); sfx(6) } resetWorld() }
 
 // ---------- one sim tick ----------
