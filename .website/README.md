@@ -1,4 +1,7 @@
 ---
+genres:
+  - puzzle
+  - platformer
 directors_cut: https://mvnshi.github.io/js13k-2026/
 # See github.com/js13kGames/hello-world for supported frontmatter
 ---
